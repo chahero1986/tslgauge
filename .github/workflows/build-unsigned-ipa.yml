@@ -46,6 +46,15 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos || true
 
+      - name: Verify Swift call sites
+        # memberwise init 的实参顺序必须与结构体声明顺序一致。
+        # 提前拦截 "argument 'speed' must precede argument 'unit'" 这类编译错误，
+        # 不用等几分钟的 xcodebuild 才看到失败。
+        run: python3 scripts/verify_swift_calls.py
+
+      - name: Verify display rules
+        run: python3 scripts/verify_seven_segment.py
+
       - name: Configure Bundle ID
         env:
           TSL_BUNDLE_ID: ${{ inputs.bundle_id || 'com.tsl.gauge' }}
