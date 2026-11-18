@@ -9,6 +9,9 @@ import ActivityKit
 struct SpeedActivityAttributes: ActivityAttributes {
     public struct ContentState: Codable, Hashable {
         var speedText: String
+        /// 原始速度数值，用于 0~60 绿 / 61~100 黄 / >100 红 的分段配色。
+        /// 与 speedText 分开传，避免 Extension 侧解析 "--" 之类的显示串。
+        var speed: Int?
         var unit: String
         var gearLabel: String
         var connected: Bool

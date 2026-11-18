@@ -163,8 +163,10 @@
   · 蓝牙密码、服务 UUID、widget kind、状态恢复标识：Sources/Shared/TSLConfig.swift
   · BLE 帧协议：Sources/App/TSLFrameCodec.swift / GaugeFrame176.swift
     （scripts/parse_frame_hex.py 可跑 --selftest，已验证 88 km/h / D 挡 / KM/H）
+  · 7 段数码管 + 配色规则：Sources/Shared/SevenSegment.swift（两个 target 共用）
   · 仪表 UI：Sources/App/TSLApp.swift；小组件 UI：Sources/Widget/SpeedWidget.swift
   · 实时活动 UI：Sources/Widget/SpeedLiveActivity.swift
+  · 改配色 / 阈值后跑：python scripts/verify_seven_segment.py（CI 也会自动跑）
   · 显示名 / App Group / Bundle ID：不用改源码，改 workflow 输入即可
   · 每次 push 到 main 也会自动构建一次，方便迭代
 
@@ -184,4 +186,57 @@
   · 单次实时活动上限 8 小时，长途需重启活动；7 天需续签。
   · 驾驶安全：数据仅供参考，以车辆自身仪表为准；不要把实时车速做成
     需要长时间注视或交互的界面。
+
+--------------------------------------------------------------------------------
+【9. 界面定制：纯速度 7 段数码管（2026-11-18 变更）】
+--------------------------------------------------------------------------------
+  需求：一个界面极度纯粹，只显示速度；字号尽量大；7 段码字形；
+        0~60 绿 / 61~100 黄 / >100 红。
+
+  实现决策：不用第三方字体，改用 SwiftUI 原生绘制标准 7 段数码管
+    · iOS 系统没有内置 7 段码字体；引入 TTF 需要 UIAppFonts 注册、
+      字体许可、CI 资源打包，Widget Extension 在自签下最容易出问题。
+    · 自绘方案零字体文件、零许可风险、任意尺寸自适应、颜色精确可控，
+      还能画出「熄灭段」（同色 13% 透明度），质感比字体更接近真实数码管。
+    · 每段画成带斜切端点的六边形；每位数只需 2 个 Shape（暗底 + 点亮），
+      Widget 渲染开销极低。
+
+  落点（三个界面共用同一个 SevenSegmentSpeedView，视觉完全一致）
+    ① 桌面 / iOS 26 原厂 CarPlay Dashboard 的 systemSmall Widget
+       —— 【最纯粹】：整个画面只有数字，无标题 / 单位 / 档位 / 时间戳 /
+          实时快照文字。背景近黑（white 0.03），数字按可用空间撑到最大。
+    ② 锁屏 / 灵动岛 / 车机 Dashboard 的 Live Activity
+       —— 同样只有数字，额外一个 5pt 状态点（绿=实时、橙=过期）。
+    ③ 主 App 全屏仪表 —— 同样的大号数码管（AirPlay 镜像兜底画面）。
+
+  分段配色（SpeedPalette.color，按原始数值，不区分 KM/H / MPH）
+       0 ... 60    绿色  rgb(0.16, 0.88, 0.36)
+      61 ... 100   黄色  rgb(1.00, 0.78, 0.10)
+      > 100        红色  rgb(1.00, 0.24, 0.22)
+      无有效读数（档位无效 / 断连 / "--"）  灰色
+    注：这是车速警示配色，与金融场景「红涨绿跌」无关。
+    Live Activity 的 ContentState 新增 speed: Int? 字段，
+    Extension 直接用数值取色，不需要解析 "--" 之类的显示串。
+
+  不冒充实时的处理
+    · 数据为快照 / 超过 300 秒 / BLE 断连 → 数字整体降到 55% 不透明度
+    · 完整状态写在 accessibility label / value（VoiceOver 与车机朗读可读）
+    · 想要肉眼可辨的状态标记：把 SevenSegmentSpeedView 的 showsStatusDot
+      设为 true（SpeedWidget.swift 里那一行 false 改 true 即可）
+    · 签名工具没给 App Group 时，共享容器读不到，Widget 会显示灰色 "--"
+      （不冒充数据）；此时桌面无数值，但锁屏 / 灵动岛 / 原厂 CarPlay
+      Dashboard 的 Live Activity 仍有秒级实时车速，见第 4、6 节。
+
+  可选：如果你坚持要「真正的字体文件」
+    1) 下载开源 DSEG7（keshikan，免费许可）的 .ttf 放进仓库
+    2) 两个 target 的 Info.plist 加 UIAppFonts 数组列出文件名
+    3) project.yml 的 sources 追加字体目录，确保被 Copy Bundle Resources
+    4) 把 SevenSegmentNumber 换成 Text(...).font(.custom("DSEG7 Modern", size:))
+    代价：许可、资源打包、Widget 字体注册时机都需要实机验证；
+    自签 + CI 场景不推荐，当前自绘方案更稳。
+
+  自检：python scripts/verify_seven_segment.py
+    从 Swift 源码解析 a~g 位定义与 case 表，逐项比对标准 7 段真值表
+    （0~9 与 '-' 共 11 个字形），并验证 0/60/61/100/101 等配色边界，
+    另检查界面纯净度与 systemSmall（CarPlay 必需）是否被误删。已全部 PASS。
 ================================================================================

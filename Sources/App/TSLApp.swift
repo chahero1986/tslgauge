@@ -51,20 +51,19 @@ struct SpeedDashboardView: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Text("TSL 实时车速")
-                .font(.headline)
-
-            Text(ble.latest?.speedText ?? "--")
-                .font(.system(size: 130, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .minimumScaleFactor(0.4)
-                .lineLimit(1)
-
-            Text(ble.latest?.unit ?? "KM/H")
-                .font(.title3)
-                .foregroundStyle(.secondary)
+            // 与小组件 / 车机完全同一套 7 段数码管与分段配色
+            SevenSegmentSpeedView(
+                text: ble.latest?.speedText ?? "--",
+                speed: ble.latest?.speed,
+                isLive: driver.connected,
+                showsStatusDot: true
+            )
+            .frame(height: 200)
+            .padding(.horizontal, 24)
 
             HStack(spacing: 12) {
+                Text(ble.latest?.unit ?? "KM/H")
+                Text("·")
                 Label(ble.latest?.gearLabel ?? "-", systemImage: "gearshape")
                 Text("·")
                 Text(ble.connectionState)

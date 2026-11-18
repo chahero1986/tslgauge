@@ -28,6 +28,7 @@ final class SpeedActivityController {
         let attributes = SpeedActivityAttributes(deviceName: deviceName)
         let state = SpeedActivityAttributes.ContentState(
             speedText: "--", unit: "KM/H", gearLabel: "-",
+            speed: nil,
             connected: false, live: false, updatedAt: Date()
         )
         let content = ActivityContent(
@@ -45,6 +46,7 @@ final class SpeedActivityController {
         guard let activity else { return }
         let state = SpeedActivityAttributes.ContentState(
             speedText: gauge.speedText,
+            speed: gauge.speed,
             unit: gauge.unit,
             gearLabel: gauge.gearLabel,
             connected: true,
@@ -62,6 +64,7 @@ final class SpeedActivityController {
         guard let activity else { return }
         let state = SpeedActivityAttributes.ContentState(
             speedText: "--", unit: "KM/H", gearLabel: "-",
+            speed: nil,
             connected: false, live: false, updatedAt: Date()
         )
         // staleDate = now → 系统立刻标记为过期，UI 显示失效态而不是旧车速
@@ -74,6 +77,7 @@ final class SpeedActivityController {
         activity = nil
         let final = SpeedActivityAttributes.ContentState(
             speedText: "--", unit: "KM/H", gearLabel: "-",
+            speed: nil,
             connected: false, live: false, updatedAt: Date()
         )
         Task {

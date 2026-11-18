@@ -2,14 +2,15 @@ import SwiftUI
 import WidgetKit
 import ActivityKit
 
-/// 秒级实时的主载体：锁屏 / 灵动岛 / iOS 26 CarPlay Dashboard。
+/// 秒级实时的主载体：锁屏 / 灵动岛 / iOS 26 原厂 CarPlay Dashboard。
 ///
 /// · 数据由主 App 用 Activity.update 本地推送，pushType: nil，不需要 APNs
 ///   （免费个人 Team 没有 aps-environment，这是自签能跑通的关键）。
 /// · iOS 26 起，iPhone 上一启动 Live Activity 就自动出现在 CarPlay Dashboard；
 ///   Dashboard 不可见时还会以车机底部通知形式出现（WWDC25-216）。
+/// · 与桌面小组件共用同一套 7 段数码管 + 速度分段配色，车机看到的画面一致。
 /// · staleDate 由主 App 设为 now+8s，BLE 断流后 context.isStale 自动变 true，
-///   界面必须显示失效态，避免拿旧车速冒充实时。
+///   数字变暗 + 状态点变橙，避免拿旧车速冒充实时。
 ///
 /// Target membership：仅 Widget Extension（数据契约在 SpeedAttributes.swift）。
 struct SpeedLiveActivity: Widget {
@@ -21,11 +22,15 @@ struct SpeedLiveActivity: Widget {
                 DynamicIslandExpandedRegion(.leading) {
                     Label(context.state.gearLabel, systemImage: "speedometer")
                         .font(.caption)
+                        .foregroundStyle(SpeedPalette.color(for: context.state.speed))
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text(context.state.speedText)
-                        .font(.system(size: 30, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
+                    SevenSegmentNumber(
+                        text: context.state.speedText,
+                        color: SpeedPalette.color(for: context.state.speed),
+                        inactiveColor: SpeedPalette.inactive(for: context.state.speed)
+                    )
+                    .frame(width: 82, height: 36)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack {
@@ -40,56 +45,41 @@ struct SpeedLiveActivity: Widget {
                 }
             } compactLeading: {
                 Image(systemName: "speedometer")
+                    .foregroundStyle(SpeedPalette.color(for: context.state.speed))
             } compactTrailing: {
-                Text(context.state.speedText).monospacedDigit()
+                Text(context.state.speedText)
+                    .monospacedDigit()
+                    .foregroundStyle(SpeedPalette.color(for: context.state.speed))
             } minimal: {
-                Text(context.state.speedText).monospacedDigit()
+                Text(context.state.speedText)
+                    .monospacedDigit()
+                    .foregroundStyle(SpeedPalette.color(for: context.state.speed))
             }
-            .keylineTint(.cyan)
+            .keylineTint(SpeedPalette.color(for: context.state.speed))
         }
     }
 }
 
+/// 锁屏 / CarPlay Dashboard 上的纯速度界面：只有数码管数字，
+/// 加一个 5pt 状态点区分实时与过期，不放任何其它文字。
 private struct SpeedLockScreenView: View {
     let context: ActivityViewContext<SpeedActivityAttributes>
 
+    private var isLive: Bool {
+        !context.isStale && context.state.live && context.state.connected
+    }
+
     var body: some View {
-        let invalid = context.isStale || !context.state.live || !context.state.connected
-
-        HStack(spacing: 16) {
-            Image(systemName: "speedometer")
-                .font(.title2)
-                .foregroundStyle(.cyan)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(context.attributes.deviceName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(context.state.speedText)
-                        .font(.system(size: 40, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                    Text(context.state.unit)
-                        .font(.caption)
-                }
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(context.state.gearLabel)
-                    .font(.title3)
-                Text(invalid ? "数据已过期" : "实时")
-                    .font(.caption2)
-                    .foregroundStyle(invalid ? .orange : .green)
-                Text(context.state.updatedAt, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .opacity(invalid ? 0.6 : 1)
-        .activityBackgroundTint(Color(white: 0.06))
+        SevenSegmentSpeedView(
+            text: context.state.speedText,
+            speed: context.state.speed,
+            isLive: isLive,
+            showsStatusDot: true
+        )
+        .frame(height: 92)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .activityBackgroundTint(Color(white: 0.03))
         .activitySystemActionForegroundColor(.white)
     }
 }
