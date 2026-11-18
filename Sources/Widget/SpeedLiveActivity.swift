@@ -39,7 +39,11 @@ struct SpeedLiveActivity: Widget {
                         Text(context.state.updatedAt, style: .time)
                         Spacer()
                         Text(context.isStale ? "数据已过期" : "实时")
-                            .foregroundStyle(context.isStale ? .orange : .secondary)
+                            // 显式写 Color，避免 ?: 两端被推断成
+                            // Color 与 HierarchicalShapeStyle 导致类型不一致编译失败
+                            .foregroundStyle(context.isStale
+                                ? Color.orange
+                                : Color.secondary)
                     }
                     .font(.caption2)
                 }

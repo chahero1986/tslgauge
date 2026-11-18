@@ -239,4 +239,38 @@
     从 Swift 源码解析 a~g 位定义与 case 表，逐项比对标准 7 段真值表
     （0~9 与 '-' 共 11 个字形），并验证 0/60/61/100/101 等配色边界，
     另检查界面纯净度与 systemSmall（CarPlay 必需）是否被误删。已全部 PASS。
+
+--------------------------------------------------------------------------------
+【10. CI 排错：首轮 xcodebuild 失败（已修复）】
+--------------------------------------------------------------------------------
+  现象（macos-26 / Xcode 26.6 / iPhoneOS26.5 SDK，exit 65）：
+    Sources/App/SpeedRefreshDriver.swift:31:13:
+      error: argument 'speed' must precede argument 'unit'
+    同样报错在第 67、80 行，共 3 处。
+
+  原因：Swift 结构体的逐一构造器（memberwise initializer）要求实参顺序与
+    属性声明顺序【完全一致】。ContentState 声明顺序为
+      speedText → speed → unit → gearLabel → connected → live → updatedAt
+    上一轮给 Live Activity 加 `speed: Int?` 时，3 处调用把它插到了
+    unit / gearLabel 之后。旧自检只查「有没有 speed 字段」，没查顺序，
+    因此漏到编译期才暴露。
+
+  已修复
+    ~ Sources/App/SpeedRefreshDriver.swift   3 处调用改为与声明一致的顺序
+    ~ Sources/Widget/SpeedLiveActivity.swift ?: 两侧显式写 Color.orange /
+      Color.secondary，避免被推断成 Color 与 HierarchicalShapeStyle 冲突
+    + scripts/verify_swift_calls.py         解析结构体声明顺序与全部调用点
+      实参顺序，编译前拦截同类错误（另查括号平衡、@main 数量、调用点下限）
+    ~ .github/workflows/build-unsigned-ipa.yml
+      新增 `Verify Swift call sites` 步骤，排在编译之前
+
+  复跑：push 这几个改动 → Actions → Run workflow。
+    若 `Verify Swift call sites` 变红，按输出里的「声明= / 实参=」对齐即可，
+    不用等几分钟的 xcodebuild。
+
+  重要判断：本轮日志里 App target 的 9 个 Swift 是同一批编译的，除这 3 处
+    外没有任何报错 → 说明 Xcode 26.6 下 ActivityContent / Activity.request /
+    containerBackground / WidgetKit 等 API 用法都成立。
+    Widget Extension target 这轮还没被编译到，下一轮才首次真编译；
+    若它报错，按 workflow 上传的 xcodebuild-log 定位。
 ================================================================================
