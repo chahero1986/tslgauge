@@ -1,0 +1,81 @@
+name: Build unsigned IPA
+
+# 产出【未签名 IPA】：GitHub runner 无法登录你的 Apple ID，
+# 最终签名由你在 Windows 上用 Sideloadly / AltStore / SideStore 完成。
+# 建议把仓库设为 Public —— 公开仓库的 macOS runner 免费，
+# 私有仓库的 macOS 分钟按 10 倍系数扣减免费额度。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      app_group_id:
+        description: 'App Group ID（可留空；留空时桌面 Widget 降级，Live Activity 仍可用）'
+        required: false
+        default: ''
+      bundle_id:
+        description: '主 App Bundle ID（Extension 自动追加 .widgets）'
+        required: false
+        default: 'com.tsl.gauge'
+      display_name:
+        description: 'App 显示名'
+        required: false
+        default: 'TSL 车速'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-unsigned-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # 2026-11 起 macos-latest 已指向 macos-26；这里显式锁定，避免 Xcode 版本漂移
+    runs-on: macos-26
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      - name: Configure Bundle ID
+        env:
+          TSL_BUNDLE_ID: ${{ inputs.bundle_id || 'com.tsl.gauge' }}
+          TSL_APP_GROUP: ${{ inputs.app_group_id || '' }}
+        run: |
+          python3 scripts/configure.py
+          echo "--- project.yml (bundle ids) ---"
+          grep PRODUCT_BUNDLE_IDENTIFIER project.yml
+
+      - name: Build unsigned IPA
+        env:
+          TSL_APP_GROUP: ${{ inputs.app_group_id || '' }}
+          TSL_DISPLAY_NAME: ${{ inputs.display_name || 'TSL 车速' }}
+        run: bash scripts/build_unsigned.sh
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TSLGauge-unsigned-ipa
+          path: |
+            build/TSLGauge-unsigned.ipa
+            build/build-info.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 14
