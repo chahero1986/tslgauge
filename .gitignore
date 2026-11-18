@@ -1,0 +1,9 @@
+build/
+DerivedData/
+*.xcodeproj/
+*.xcarchive/
+*.ipa
+*.pyc
+__pycache__/
+.swiftpm/
+.DS_Store
