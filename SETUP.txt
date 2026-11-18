@@ -1,0 +1,187 @@
+================================================================================
+ TSLGauge — 通过 GitHub Actions 产出未签名 IPA，再在 Windows 自签
+ iOS 26+ / 原厂 CarPlay / 无开发者账号 / 桌面 + 车机 / 秒级实时
+ 2026-11-18
+================================================================================
+
+【这是什么】
+  一个可直接 push 到 GitHub 的最小 Xcode 工程。它【不依赖】原来的 TSL-IOS.ipa，
+  也不包含任何微信/小程序代码，而是按已还原的 BLE 协议直连 TSL 加装模块
+  （FFF0/FFF1，默认密码 1234，1.5s 一回 176 帧），自己解析车速后送到：
+
+    ① Live Activity（锁屏 / 灵动岛 / iOS 26 原厂 CarPlay Dashboard）
+       —— 秒级实时的主载体，数据走 ActivityKit ContentState，不需要 App Group
+    ② WidgetKit systemSmall（iPhone 桌面 / 锁屏 / StandBy / CarPlay Dashboard）
+       —— 同一个小组件代码自动上桌面和车机；需要 App Group 才能读到数值
+    ③ 主 App 全屏仪表（前台常亮，也可作 AirPlay 镜像兜底）
+
+  GitHub Actions 的 macos-26 runner（默认 Xcode 26.6）会在云端编译并产出
+  【未签名 IPA】。GitHub runner 无法登录你的 Apple ID，所以最后一步签名必须
+  在你自己的 Windows 电脑上完成。
+
+--------------------------------------------------------------------------------
+【0. 你的两项确认带来的结论】
+--------------------------------------------------------------------------------
+  · iPhone iOS 26+ / 原厂 CarPlay
+      → WWDC25-216 的「普通 systemSmall Widget + Live Activity 自动出现在
+        CarPlay Dashboard」完全适用，不需要 CarPlay entitlement，不需要
+        CarPlay App，不需要 Apple 审批。车机侧入口：
+        iPhone「设置 → 通用 → CarPlay → 选你的车 → 小组件 → 显示小组件」。
+      → 注意：仍然做不了 CPTemplate 自定义全屏 CarPlay App（那个必须 Apple
+        授权 entitlement + 付费账号），本方案也不做那个。
+  · 通过 GitHub 生成 IPA
+      → 本地没有 Mac 不再是阻断项。macos-26 runner 已在 2026-02 GA，
+        macos-latest 自 2026-07 起也指向它，默认 Xcode 26.4.1~26.6。
+      → 公开仓库的 GitHub-hosted macOS runner 免费；私有仓库 macOS 分钟
+        按 10 倍系数扣减免费额度 → 【强烈建议建 Public 仓库】。
+        本仓库不含任何密钥/证书/隐私数据，可以安全公开。
+
+--------------------------------------------------------------------------------
+【1. 一次性准备】
+--------------------------------------------------------------------------------
+  1) GitHub 账号（免费即可），新建一个 Public 仓库，例如 TSLGauge。
+  2) 把本目录【所有内容】上传（含隐藏的 .github 目录）：
+       网页上传：把除 .git 外的文件打包 zip，在仓库页 Add file → Upload files
+       命令行：  git init && git add . && git commit -m init
+                && git remote add origin <你的仓库地址> && git push -u origin main
+     ⚠️ 必须让 .github/workflows/build-unsigned-ipa.yml 位于仓库根目录的这个路径，
+        否则 Actions 不会触发。
+  3) Windows 准备自签工具（二选一，见第 4 节取舍）：
+       Sideloadly（sideloadly.io）或 AltServer + AltStore（altstore.io）
+       以及免费的 Apple ID（建议专门注册一个，不要用主账号）。
+  4) iPhone 开启开发者模式（iOS 16+）：设置 → 隐私与安全性 → 开发者模式。
+
+--------------------------------------------------------------------------------
+【2. 触发构建】
+--------------------------------------------------------------------------------
+  仓库页 → Actions → 左侧 "Build unsigned IPA" → Run workflow，填三个输入：
+
+    app_group_id   可留空。若你的签名工具能创建 App Group，填形如
+                   group.com.yourname.tsl.speed（见第 4 节）。
+                   留空时构建会写入内部哨兵 __NO_APP_GROUP__（Info.plist 里
+                   看到它属正常，代码会当作「不启用」处理）
+    bundle_id      默认 com.tsl.gauge。若要改，用反向域名，且别和已装 App 冲突；
+                   Extension 会自动变成 <bundle_id>.widgets
+    display_name   默认「TSL 车速」
+
+  构建约 5~15 分钟（首次 brew install xcodegen 会慢些）。
+  成功后在该次 run 页面底部 Artifacts 下载 TSLGauge-unsigned-ipa，
+  解压得到：
+       TSLGauge-unsigned.ipa    ← 拿去自签
+       build-info.txt           ← Xcode 版本 / App Group / SHA256 / IPA 结构
+  失败时会自动上传 xcodebuild-log，先看日志末尾的错误再改。
+
+  构建脚本会自动校验：
+       · Payload/TSLGauge.app/PlugIns/TSLWidgets.appex 是否存在（缺了小组件就没了）
+       · UIBackgroundModes 是否含 bluetooth-central
+       · NSSupportsLiveActivities / NSExtensionPointIdentifier
+       · 两个 Info.plist 的 TSLAppGroup 是否已展开且一致
+       · 是否确实未签名（无 _CodeSignature / embedded.mobileprovision）
+  任何一项不过都会让 workflow 变红，避免拿到一个装不上或没扩展的坏包。
+
+--------------------------------------------------------------------------------
+【3. 本地自检（可选，Windows 上就能跑）】
+--------------------------------------------------------------------------------
+  python scripts/verify_ipa.py TSLGauge-unsigned.ipa --list
+  这个脚本同时被 CI 使用，可在签名前后各跑一次做对照。
+
+--------------------------------------------------------------------------------
+【4. 自签安装 —— 决定桌面 Widget 能否显示数值的关键一步】
+--------------------------------------------------------------------------------
+  ⚠️ 无论用哪个工具，遇到「是否保留 App Extensions / Keep Extensions」
+     必须选【保留】。选错的话 .appex 会被剥掉，桌面小组件和实时活动全消失。
+
+  两种工具的取舍（这是本方案唯一还需要实机验证的不确定项）：
+   A) AltStore / SideStore（推荐先试）
+      会为每个 App 和 Extension 注册显式 App ID，社区实践支持创建
+      application-groups（通常有 2~3 个上限）。若成功，桌面 Widget 能读到速度。
+      安装后可用 iOS 上的 ESign/Apps Manager 或 macOS 的
+        codesign -d --entitlements :- Payload/TSLGauge.app
+      检查主 App 与 .appex 是否都有同一个 com.apple.security.application-groups。
+      → 若确认拿到了 App Group：重新跑一次 workflow，把【完全相同的】
+        group ID 填进 app_group_id，再签一次，桌面 Widget 才会显示数值。
+      顺序不能反：先签名拿到 group ID，再回填重新构建。
+   B) Sideloadly
+      免费 Apple ID 下常用通配 App ID（TEAMID.*），通配 profile 通常带不了
+      App Group。此时桌面 Widget 会显示「打开 App 查看实时车速」（不冒充数据），
+      但【Live Activity 完全可用】—— 锁屏、灵动岛、iOS 26 原厂 CarPlay
+      Dashboard 上的秒级实时车速照常工作，因为它的数据不经过 App Group。
+      在 Sideloadly 的 Advanced 选项里若有 App Group / 显式 App ID 相关设置，
+      可尝试按 A 的方式打通。
+
+  安装步骤（以 Sideloadly 为例）：
+    1) iPhone 用 USB 连 Windows，信任此电脑。
+    2) Sideloadly 拖入 TSLGauge-unsigned.ipa，填 Apple ID，点 Start。
+    3) 出现 App Extensions 选项时选【保留】。
+    4) iPhone：设置 → 通用 → VPN 与设备管理 → 信任开发者。
+    5) 打开 App 一次：授权蓝牙、启动 Live Activity、保持屏幕常亮。
+       模块默认密码 1234，若改过，在 App 首页输入框里改「应用密码」。
+    6) 有效期 7 天；AltStore/SideStore 可在同 WiFi 下后台自动续签，
+       Sideloadly 需每 7 天手动刷新一次。
+
+--------------------------------------------------------------------------------
+【5. 桌面与 CarPlay 上添加小组件】
+--------------------------------------------------------------------------------
+  · iPhone 桌面：长按空白处 → 编辑 → 添加小组件 → 搜「TSL 车速」→ 选 systemSmall。
+  · 锁屏：锁屏长按 → 自定 → 添加 accessoryCircular / rectangular / inline。
+  · 原厂 CarPlay（iOS 26+）：
+      iPhone 设置 → 通用 → CarPlay → 选你的车 → 小组件 → 打开「显示小组件」，
+      把 TSL 车速加进 widget stack（每车 1~3 个 stack，每 stack 最多 5 个，
+      具体数量取决于车机屏幕尺寸）。
+      Live Activity 一旦在 iPhone 上启动会【自动】出现在 CarPlay Dashboard；
+      Dashboard 不可见时还会以车机底部通知形式弹出，不需要额外配置。
+  · 若小组件列表里搜不到：先打开一次主 App，再重启 iPhone 重试
+    （侧载 App 的 widget 注册偶有延迟）。
+
+--------------------------------------------------------------------------------
+【6. 秒级实时在哪里成立、在哪里不成立（务必如实理解）】
+--------------------------------------------------------------------------------
+  ✅ Live Activity：BLE 后台 bluetooth-central 唤醒进程 → 本地 Activity.update
+     （pushType: nil，不需要 APNs / 付费账号）→ 约 1~2 秒级。
+     这是锁屏、灵动岛、CarPlay 上真正可靠的实时通道。
+     断流 8 秒后 staleDate 到期，界面自动变「数据已过期」，不会拿旧车速冒充实时。
+  ✅ 主 App 全屏仪表：前台常亮（isIdleTimerDisabled = true）时逐帧刷新。
+  ⚠️ 桌面 Widget：主 App 前台时 reloadTimelines 不计入 WidgetKit 预算，
+     可做到约 1~2 秒级；iPhone 锁屏后主 App 不再前台，退回带时间戳的快照，
+     界面会明确标「实时 / 快照」。CarPlay 连接时手机通常锁屏 →
+     【车机上的可靠秒级实时靠 Live Activity，不是靠 Widget】。
+  ❌ 不存在的能力：Widget Extension 自己连 BLE、Widget 严格 1.5s 刷新、
+     APNs 推送更新 Live Activity、后台被彻底杀死后自动复活。
+     上车前手动打开一次 App 是必需动作。
+
+  ⚠️【重要：BLE 单连接互斥】绝大多数 BLE 外设同一时刻只允许一个 Central 连接。
+     TSL 模块被原来的「TSL模块管理」App 连着时，本 App 会扫到但连不上
+     （或反复断开）。行车时请【不要同时运行原 App】：
+       · 要么完全用本 App 接管 BLE（推荐）；
+       · 要么在原 App 里主动断开蓝牙后再切到本 App。
+     同理，两台 iPhone 不能同时连同一个模块。若出现「正在连接 → 已断开」
+     循环，第一件事就是检查原 App 是否还占着连接。
+
+--------------------------------------------------------------------------------
+【7. 改配置 / 改代码】
+--------------------------------------------------------------------------------
+  · 蓝牙密码、服务 UUID、widget kind、状态恢复标识：Sources/Shared/TSLConfig.swift
+  · BLE 帧协议：Sources/App/TSLFrameCodec.swift / GaugeFrame176.swift
+    （scripts/parse_frame_hex.py 可跑 --selftest，已验证 88 km/h / D 挡 / KM/H）
+  · 仪表 UI：Sources/App/TSLApp.swift；小组件 UI：Sources/Widget/SpeedWidget.swift
+  · 实时活动 UI：Sources/Widget/SpeedLiveActivity.swift
+  · 显示名 / App Group / Bundle ID：不用改源码，改 workflow 输入即可
+  · 每次 push 到 main 也会自动构建一次，方便迭代
+
+--------------------------------------------------------------------------------
+【8. 已知风险与诚实边界】
+--------------------------------------------------------------------------------
+  · Swift 代码是【可编译起点】，本仓库未在真机 Xcode 编译/运行验证；
+    CI 首次运行可能暴露 API 差异（尤其 Xcode 26 的 ActivityKit / WidgetKit 签名），
+    按 xcodebuild-log 报错改即可。
+  · 「自签 App 的 widget 能否被 iOS 26 CarPlay widget gallery 正常收录」
+    没有 Apple 公开背书，属于必须实机验证项。若车机侧搜不到，
+    兜底是主 App 全屏仪表 + AirPlay 镜像（见《自签落地方案.txt》第 8 节）。
+  · App Group 能否拿到取决于签名工具（第 4 节），已做双轨降级设计，
+    即使完全没有 App Group，CarPlay 上的秒级实时仍然成立。
+  · Live Activity 更新预算是系统黑盒，1~2s 是经验值；频繁调用可能被静默丢弃，
+    代码里已做 1s 节流 + 3s 心跳 + 只在数值变化时更新。
+  · 单次实时活动上限 8 小时，长途需重启活动；7 天需续签。
+  · 驾驶安全：数据仅供参考，以车辆自身仪表为准；不要把实时车速做成
+    需要长时间注视或交互的界面。
+================================================================================
