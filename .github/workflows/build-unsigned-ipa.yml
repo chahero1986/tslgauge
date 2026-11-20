@@ -55,6 +55,11 @@ jobs:
       - name: Verify display rules
         run: python3 scripts/verify_seven_segment.py
 
+      - name: Verify BLE diagnostics
+        # 确保 FFF1/FFE0 特征回退、全链路日志、看门狗、诊断界面、字段清单
+        # 在后续改动里没被误删（首次真机反馈「FFF1 特征不完整」的根因）
+        run: python3 scripts/verify_ble_diagnostics.py
+
       - name: Configure Bundle ID
         env:
           TSL_BUNDLE_ID: ${{ inputs.bundle_id || 'com.tsl.gauge' }}
