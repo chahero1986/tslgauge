@@ -15,6 +15,7 @@ Swift 编译器要求结构体 memberwise init 的实参顺序与属性声明顺
 校验对象（数据契约结构体，全是纯 stored property）：
     SpeedActivityAttributes.ContentState  Sources/Shared/SpeedAttributes.swift
     SpeedSnapshot                         Sources/Shared/SharedSpeedStore.swift
+    GaugeExtrasState                      Sources/Shared/GaugeExtrasState.swift
     SpeedEntry                            Sources/Widget/SpeedWidget.swift
     GaugeState                            Sources/App/GaugeFrame176.swift
 """
@@ -28,12 +29,19 @@ SOURCES = ROOT / "Sources"
 DECL_FILES = {
     "ContentState": "Sources/Shared/SpeedAttributes.swift",
     "SpeedSnapshot": "Sources/Shared/SharedSpeedStore.swift",
+    "GaugeExtrasState": "Sources/Shared/GaugeExtrasState.swift",
     "SpeedEntry": "Sources/Widget/SpeedWidget.swift",
     "GaugeState": "Sources/App/GaugeFrame176.swift",
 }
 
 # 防止正则失效时「零调用 = 全部通过」的假阳性
-MIN_CALLS = {"ContentState": 4, "SpeedSnapshot": 3, "SpeedEntry": 3, "GaugeState": 1}
+MIN_CALLS = {
+    "ContentState": 4,
+    "SpeedSnapshot": 3,
+    "GaugeExtrasState": 2,
+    "SpeedEntry": 3,
+    "GaugeState": 1,
+}
 
 errors = []
 
@@ -173,10 +181,11 @@ def struct_body(src: str, name: str):
 
 
 def stored_properties(body: str):
-    """按声明顺序取 stored property；跳过 computed property（行内含 { }）。"""
+    """按声明顺序取 stored property；跳过 computed property（行内含 { }）
+    与带初始化符 = 的行（那是局部变量或已带默认值的声明，不参与逐一构造器）。"""
     fields = []
     for line in body.splitlines():
-        if "{" in line or "}" in line:
+        if "{" in line or "}" in line or "=" in line:
             continue
         m = re.match(
             r"^\s*(?:(?:public|private|internal|fileprivate)\s+)?"

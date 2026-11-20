@@ -83,13 +83,38 @@ def main() -> int:
                         (101, "high"), (180, "high"), (511, "high")]:
         check(f"{str(value):>4} → {want}", bucket(value) == want)
 
-    print("\n=== 4. 界面纯净度与 CarPlay 兼容 ===")
+    print("\n=== 4. 双小组件布局与 CarPlay 兼容 ===")
     widget_src = WIDGET.read_text(encoding="utf-8")
     activity_src = ACTIVITY.read_text(encoding="utf-8")
-    check("Widget 使用 SevenSegmentSpeedView", "SevenSegmentSpeedView(" in widget_src)
-    check("Widget 默认无状态点（纯数字）", "showsStatusDot: false" in widget_src)
-    check("Widget 仍支持 systemSmall（CarPlay 必需）", ".systemSmall" in widget_src)
-    check("Widget 未残留标题/单位文字", "Text(\"TSL 车速\")" not in widget_src)
+    palette_src = (ROOT / "Sources" / "Shared" / "GaugeExtrasState.swift").read_text(encoding="utf-8")
+    bundle_src = (ROOT / "Sources" / "Widget" / "TSLWidgetsBundle.swift").read_text(encoding="utf-8")
+    car_path = ROOT / "Sources" / "Widget" / "CarBodyWidget.swift"
+
+    check("Widget 1 主体仍是 7 段数码管", "SevenSegmentNumber(" in widget_src)
+    check("Widget 1 配件家族保持纯数字", "showsStatusDot: false" in widget_src)
+    check("Widget 1 支持 systemSmall / systemMedium",
+          ".systemSmall" in widget_src and ".systemMedium" in widget_src)
+    check("Widget 1 未残留标题文字", "Text(\"TSL 车速\")" not in widget_src)
+    check("档位配色 P/R/N/D 分支齐全",
+          all(t in palette_src for t in ['case "P"', 'case "R"', 'case "N"', 'case "D"']))
+    check("电量阈值 20 / 80（红 / 绿 / 白）",
+          "percent <= 20" in palette_src and "percent <= 80" in palette_src)
+    check("速度下方显示融合限速", "限速" in widget_src)
+    check("底部显示车内 / 环境温度", "车内" in widget_src and "环境" in widget_src)
+    check("转向灯箭头位于左右中部", "TurnArrowShape" in widget_src)
+    check("AP 状态蓝色（开）/ 灰（关）", "GaugePalette.info" in widget_src)
+    check("Widget 2 车身状态地图文件存在", car_path.exists())
+    if car_path.exists():
+        car_src = car_path.read_text(encoding="utf-8")
+        check("Widget 2 图标化（门/盖板/雷达/大灯/电池加热）",
+              all(t in car_src for t in ["DoorIcon", "LidIcon", "RadarIcon",
+                                          "LightIcon", "BatteryHeatIcon"]))
+        check("Widget 2 支持 systemSmall / systemMedium",
+              ".systemSmall" in car_src and ".systemMedium" in car_src)
+        check("Widget 2 中央为电池加热（协议无其它可用状态字段）",
+              "BatteryHeatIcon" in car_src)
+    check("Bundle 注册两个小组件",
+          "SpeedWidget()" in bundle_src and "CarBodyWidget()" in bundle_src)
     check("Live Activity 也用 7 段数码管", "SevenSegmentSpeedView(" in activity_src)
     check("Live Activity 用数值而非解析显示串", "state.speed" in activity_src)
 

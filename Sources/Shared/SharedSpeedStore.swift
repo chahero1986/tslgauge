@@ -20,6 +20,8 @@ struct SpeedSnapshot: Codable {
     var connected: Bool
     var live: Bool            // 主 App 是否仍在持续收到 176 帧
     var updatedAt: Date
+    /// 除速度外的仪表字段，供两个桌面小组件（速度主仪表 / 车身状态地图）读取
+    var extras: GaugeExtrasState?
 }
 
 final class SharedSpeedStore {

@@ -21,7 +21,7 @@ struct TSLGaugeApp: App {
 
                         ble.onSpeedUpdate = { state in
                             Task { @MainActor in
-                                SpeedRefreshDriver.shared.ingest(state)
+                                SpeedRefreshDriver.shared.ingest(state, frameExtras: ble.extras)
                             }
                         }
                         ble.onDisconnect = {
@@ -31,6 +31,7 @@ struct TSLGaugeApp: App {
                         }
 
                         SpeedActivityController.shared.start()
+                        BLELog.shared.add(.info, "主界面就绪 · 启动实时活动并开始扫描")
                         ble.startScanning()
                     }
                 }
@@ -41,17 +42,18 @@ struct TSLGaugeApp: App {
     }
 }
 
-/// 全屏仪表：既是最可靠的秒级实时界面，也是 AirPlay / AI Box 镜像投屏的源画面
-/// （iOS < 26 或 CarPlay widget 不生效时的兜底，见方案第 8 节）。
+/// 全屏仪表：既是最可靠的秒级实时界面，也是 AirPlay / AI Box 镜像投屏的源画面。
+///
+/// 按「界面要纯粹」的要求，这里只保留大号 7 段速度数字 + 一个极小的状态入口；
+/// 密码、重新扫描、连接日志、字段预览全部收进弹出的「连接诊断」页。
 struct SpeedDashboardView: View {
     @ObservedObject var ble: TSLBLEManager
     @ObservedObject var driver: SpeedRefreshDriver
 
-    @State private var passwordDraft = "1234"
+    @State private var showDiagnostics = false
 
     var body: some View {
-        VStack(spacing: 18) {
-            // 与小组件 / 车机完全同一套 7 段数码管与分段配色
+        ZStack(alignment: .bottom) {
             SevenSegmentSpeedView(
                 text: ble.latest?.speedText ?? "--",
                 speed: ble.latest?.speed,
@@ -60,47 +62,39 @@ struct SpeedDashboardView: View {
             )
             .frame(height: 200)
             .padding(.horizontal, 24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
-            HStack(spacing: 12) {
-                Text(ble.latest?.unit ?? "KM/H")
-                Text("·")
-                Label(ble.latest?.gearLabel ?? "-", systemImage: "gearshape")
-                Text("·")
-                Text(ble.connectionState)
-                Text("·")
-                Text(ble.authenticated ? "已认证" : "未认证")
-            }
-            .font(.subheadline)
-            .foregroundStyle(.secondary)
-
-            Divider().padding(.horizontal, 40)
-
-            HStack {
-                TextField("蓝牙密码", text: $passwordDraft)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 140)
-                Button("应用密码") { ble.setPassword(passwordDraft) }
-                    .buttonStyle(.bordered)
-            }
-
-            HStack {
-                Button("重新扫描") { ble.startScanning() }
-                    .buttonStyle(.borderedProminent)
-                Button("断开") {
-                    ble.disconnect()
-                    SpeedRefreshDriver.shared.markDisconnected()
+            Button { showDiagnostics = true } label: {
+                HStack(spacing: 7) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 7, height: 7)
+                    Text(ble.connectionState)
+                        .font(.footnote)
+                    Image(systemName: "chevron.up")
+                        .font(.caption2)
                 }
-                .buttonStyle(.bordered)
-            }
-
-            Text("保持本界面常亮时，桌面 / CarPlay 小组件可秒级刷新；"
-               + "锁屏后的实时数值请看锁屏实时活动。数据仅供参考，以车辆仪表为准。")
-                .font(.footnote)
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 28)
+            .accessibilityLabel("打开连接诊断，当前状态：\(ble.connectionState)")
         }
-        .padding()
+        .sheet(isPresented: $showDiagnostics) {
+            ConnectionDiagnosticsView(ble: ble, log: BLELog.shared)
+        }
+    }
+
+    /// 绿 = 实时数据；橙 = 正在连接/认证；红 = 明确失败；灰 = 未连接
+    private var statusColor: Color {
+        switch ble.stage {
+        case .streaming:                          return .green
+        case .failed, .bluetoothOff, .unauthorized: return .red
+        case .disconnected, .idle:                return .gray
+        default:                                  return .orange
+        }
     }
 }

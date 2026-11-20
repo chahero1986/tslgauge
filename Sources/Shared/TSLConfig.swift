@@ -29,6 +29,9 @@ enum TSLConfig {
     /// WidgetKit 的 kind，主 App reloadTimelines 与 Widget 声明必须完全一致
     static let widgetKind = "TSLSpeedWidget"
 
+    /// 第二个小组件（车身状态地图）的 kind，同样要求主 App 与声明一致
+    static let carBodyWidgetKind = "TSLCarBodyWidget"
+
     /// CoreBluetooth 状态恢复标识（每次启动必须一致，否则后台恢复链会断）
     static let bleRestoreIdentifier = "com.tsl.gauge.ble.central"
 
@@ -36,6 +39,18 @@ enum TSLConfig {
     static let defaultBLEPassword = "1234"
 
     /// BLE 服务 / 特征（从小程序 app-service.js 还原）
+    ///
+    /// 原 JS 用的是「UUID 字符串包含」而不是精确相等，且通知特征有回退链：
+    ///   写特征 = UUID 含 FFF1 且可写
+    ///   通知特征 = FFF1 同时「可通知 + 可写」→ 用 FFF1
+    ///             否则 → 找 UUID 含 FFE0 的特征（实测模块常见形态）
+    /// 所以特征发现必须请求【全部】特征，不能只 discover FFF1 一个。
     static let serviceUUID = "FFF0"
     static let characteristicUUID = "FFF1"
+    static let writeCharacteristicUUID = "FFF1"
+    static let notifyFallbackUUID = "FFE0"
+
+    /// 扫描 / 认证看门狗阈值（秒），诊断页会如实显示当前阶段
+    static let scanTimeout: TimeInterval = 12
+    static let dataSilenceTimeout: TimeInterval = 8
 }

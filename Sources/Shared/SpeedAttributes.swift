@@ -17,6 +17,10 @@ struct SpeedActivityAttributes: ActivityAttributes {
         var connected: Bool
         var live: Bool
         var updatedAt: Date
+        /// 除速度外的仪表字段（档位 / 电量 / AP / 限速 / 转向灯 / 双温度 /
+        /// 胎压 / 刹车温度 / 车门 / 前后备箱 / 盲区 / 灯光位 / 电池加热），
+        /// 定义在 GaugeExtrasState.swift。短帧或未连接时为 nil → 界面显示 "--"。
+        var extras: GaugeExtrasState?
     }
 
     var deviceName: String
