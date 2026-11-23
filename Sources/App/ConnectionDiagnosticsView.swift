@@ -101,6 +101,7 @@ struct ConnectionDiagnosticsView: View {
             detail("FFF0 下全部特征", ble.characteristicSummary)
             detail("选定的写特征", ble.writeSummary)
             detail("选定的通知特征", ble.notifySummary)
+            detail("已跳过的非 TSL 设备", ble.rejectedSummary)
         }
     }
 
@@ -126,7 +127,7 @@ struct ConnectionDiagnosticsView: View {
 
     private var noteSection: some View {
         Section {
-            Text("常见「连不上」原因：① 原「TSL模块管理」App 或另一台 iPhone 正占着同一个 BLE 连接（模块同时只允许一个 Central）；② 模块未通电；③ 模块处于 BOOT/DFU 固件升级模式；④ 4 位蓝牙密码不是 1234。")
+            Text("常见「连不上」原因：① 附近的蓝牙打印机 / 标签机同样广播 FFF0 服务，App 会逐台验证并自动跳过非 TSL 设备（见上方「已跳过」清单）；② 原「TSL模块管理」App 或另一台 iPhone 正占着同一个 BLE 连接（模块同时只允许一个 Central）；③ 模块未通电或不在广播；④ 模块处于 BOOT/DFU 固件升级模式；⑤ 4 位蓝牙密码不是 1234。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Text("数据仅供参考，以车辆自身仪表为准。")
@@ -179,6 +180,7 @@ struct ConnectionDiagnosticsView: View {
             "全部特征: \(ble.characteristicSummary)",
             "写特征: \(ble.writeSummary)",
             "通知特征: \(ble.notifySummary)",
+            "已跳过的非 TSL 设备: \(ble.rejectedSummary)",
             "已收帧数: \(ble.frameCount)",
             "--- 日志 ---"
         ].joined(separator: "\n")

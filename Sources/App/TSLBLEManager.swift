@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CoreBluetooth
+import UIKit
 
 /// TSL 模块 BLE 连接（路径 A：独立原生 App 直连模块，不依赖微信壳）
 ///
@@ -36,6 +37,8 @@ final class TSLBLEManager: NSObject, ObservableObject {
     @Published private(set) var characteristicSummary = "-"
     @Published private(set) var writeSummary = "-"
     @Published private(set) var notifySummary = "-"
+    /// 已判定非 TSL 并跳过的设备清单（诊断页显示 / 导出）
+    @Published private(set) var rejectedSummary = "无"
 
     /// 收到新速度时回调，用于驱动 Live Activity 更新 / WidgetCenter.reloadTimelines
     var onSpeedUpdate: ((GaugeState) -> Void)?
@@ -70,6 +73,15 @@ final class TSLBLEManager: NSObject, ObservableObject {
     private var writeType: CBCharacteristicWriteType = .withResponse
     private var chunkSize = TSLFrame.defaultChunkSize
 
+    // 2026-11-21 增补：FFF0 是蓝牙打印机通用服务，实测环境会撞上一堆打印机。
+    //   · rejectedDevices：已判定「非 TSL 模块」的设备，本轮会话内直接跳过
+    //   · pendingCandidate：弱信号候选，先记着继续扫，扫描超时再退而连接
+    //   · authRetryCount：认证阶段无任何 TSL 帧的重试轮数，超限即拉黑
+    private var rejectedDevices: [UUID: String] = [:]
+    private var pendingCandidate: CBPeripheral?
+    private var pendingCandidateRSSI: Int = -127
+    private var authRetryCount = 0
+
     override init() {
         super.init()
         // 状态恢复：App 在后台被系统回收后，iOS 可为 BLE 事件重新拉起进程并归还连接
@@ -80,6 +92,13 @@ final class TSLBLEManager: NSObject, ObservableObject {
         )
         log.add(.info, "App 启动 · BLE 管理器已创建（恢复标识 \(Self.restoreIdentifier)）")
         log.add(.info, "协议配置：服务 FFF0 / 写特征 FFF1 / 通知特征 FFF1 或 FFE0 / 密码 \(password)")
+        // Timer 在 App 退后台时会被 iOS 挂起（实测连接超时显示 11391 秒就是这么来的），
+        // 回前台时立刻补一次超时检查
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil, queue: .main) { [weak self] _ in
+            self?.checkTimeouts()
+        }
         startWatchdog()
     }
 
@@ -116,16 +135,23 @@ final class TSLBLEManager: NSObject, ObservableObject {
         lastFrameAt = nil
         notifiedDataOnce = false
         fragmentCount = 0
+        authRetryCount = 0
+        pendingCandidate = nil
+        pendingCandidateRSSI = -127
         scanRestartCount += 1
         central.scanForPeripherals(withServices: [Self.serviceUUID], options: nil)
+        let skippedNote = rejectedDevices.isEmpty
+            ? "" : "（已识别并跳过 \(rejectedDevices.count) 台非 TSL 设备）"
         transition(.scanning, state: "正在搜索 TSL 模块…",
-                   hint: "正在监听 FFF0 广播。若 12 秒无结果，会提示最可能的三个原因",
+                   hint: "正在监听 FFF0 广播\(skippedNote)。注意：FFF0 也是蓝牙打印机的通用服务，App 会逐台验证并自动排除非 TSL 设备",
                    detail: "第 \(scanRestartCount) 次扫描")
     }
 
     private func restartScan() {
         guard central.state == .poweredOn, autoReconnect else { return }
         central.stopScan()
+        pendingCandidate = nil
+        pendingCandidateRSSI = -127
         scanRestartCount += 1
         central.scanForPeripherals(withServices: [Self.serviceUUID], options: nil)
         transition(.scanning, state: "重新搜索 TSL 模块…",
@@ -149,6 +175,7 @@ final class TSLBLEManager: NSObject, ObservableObject {
         deviceInfoProofCount = 0
         lastAutoPilot = 0
         subscriptionSucceeded = false
+        authRetryCount = 0
         writeCharacteristic = nil
         notifyCharacteristic = nil
         notifyCandidates = []
@@ -224,6 +251,13 @@ final class TSLBLEManager: NSObject, ObservableObject {
 
         switch stage {
         case .scanning:
+            // 12s 内只有弱信号候选 → 退而连接最强的那个（连上后再验证）
+            if let candidate = pendingCandidate,
+               rejectedDevices[candidate.identifier] == nil {
+                log.add(.warn, "扫描 \(Int(elapsed))s 未见强信号候选 → 尝试连接最强弱信号（\(pendingCandidateRSSI) dBm）")
+                connectCandidate(candidate)
+                return
+            }
             log.add(.warn, "扫描 \(Int(elapsed))s 未发现 FFF0 广播")
             hint = "没搜到模块：① 模块是否通电 ② 原「TSL模块管理」App 是否还连着蓝牙（BLE 单连接互斥）③ 两台 iPhone 不要同时连"
             restartScan()
@@ -231,7 +265,13 @@ final class TSLBLEManager: NSObject, ObservableObject {
         case .connecting:
             log.add(.error, "连接 \(Int(elapsed))s 未成功（常见于模块被其它 App 占用）")
             hint = "连接超时：先在原 App 里断开蓝牙或重启模块电源，再点「重新扫描」"
-            if let peripheral = peripheral { central.cancelPeripheralConnection(peripheral) }
+            if let peripheral = peripheral {
+                // 连不上的设备大概率也不在有效范围内，拉黑避免反复撞同一台
+                let name = peripheral.name ?? "未命名"
+                rejectedDevices[peripheral.identifier] = "\(name)：连接 \(Int(elapsed))s 无响应"
+                updateRejectedSummary()
+                central.cancelPeripheralConnection(peripheral)
+            }
             restartScan()
 
         case .discoveringServices, .discoveringCharacteristics:
@@ -246,9 +286,29 @@ final class TSLBLEManager: NSObject, ObservableObject {
             tryNextNotifyCandidate(reason: "订阅超时")
 
         case .awaitingAuth:
-            log.add(.warn, "认证 \(Int(elapsed))s 未完成，重发设备信息查询与密码")
+            // 连上 + 订阅成功后收不到任何 TSL 协议帧：重试若干轮后判定非 TSL 模块。
+            // 典型情形：连上了同样广播 FFF0 的蓝牙打印机（CASL / iKey / LEX / GLACIER…）
+            if frameCount == 0 {
+                authRetryCount += 1
+                if authRetryCount >= TSLConfig.authRetryLimit {
+                    rejectCurrentDevice("认证 \(authRetryCount) 轮零回应（发送 160/168 后无任何 TSL 帧）")
+                    return
+                }
+                log.add(.warn, "认证 \(Int(elapsed))s 零回应（第 \(authRetryCount)/\(TSLConfig.authRetryLimit) 轮），重发 160 与密码")
+                hint = "模块没回应 160/168 帧：若 \(TSLConfig.authRetryLimit) 轮后仍无回应，会自动判定该设备非 TSL 模块并继续扫描下一台"
+                if isReadyToWrite {
+                    send(type: 160)
+                    sendKey()
+                }
+                tryNextNotifyCandidate(reason: "认证零回应，尝试备用通知特征")
+                // 重置计时让看门狗能再次触发（didWarn 会挡住第二次进入）
+                didWarn = false
+                stageSince = Date()
+                return
+            }
+            log.add(.warn, "认证 \(Int(elapsed))s 未完成（已有数据帧），重发设备信息查询与密码")
             if subscriptionSucceeded {
-                log.add(.warn, "订阅已成功但一帧都没收到，怀疑通知特征选错，尝试备用特征")
+                log.add(.warn, "订阅已成功但认证未完成，尝试备用通知特征")
             }
             hint = "模块没回应 160/168 帧：检查 4 位密码；若模块在固件升级模式请先退出；也可点「重新提交密码」"
             if isReadyToWrite {
@@ -466,15 +526,77 @@ extension TSLBLEManager: CBCentralManagerDelegate {
                         advertisementData: [String: Any],
                         rssi RSSI: NSNumber) {
         let shortID = String(peripheral.identifier.uuidString.prefix(8))
-        deviceSummary = "\(peripheral.name ?? "未命名") · RSSI \(RSSI) dBm · \(shortID)"
-        log.add(.ok, "发现 FFF0 设备：\(deviceSummary)")
-        self.peripheral = peripheral
+        let advertisedName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let name = peripheral.name ?? advertisedName ?? "未命名"
+        let rssiValue = RSSI.intValue
+        deviceSummary = "\(name) · RSSI \(rssiValue) dBm · \(shortID)"
+
+        // ① 已判定非 TSL 的设备直接跳过，继续等真模块出现
+        if let reason = rejectedDevices[peripheral.identifier] {
+            log.add(.info, "跳过已识别的非 TSL 设备：\(deviceSummary)（\(reason)）")
+            return
+        }
+
+        // ② 名称含 TSL 或信号足够强 → 立即连接
+        let nameLooksTSL = name.uppercased().contains("TSL")
+        if nameLooksTSL || rssiValue >= TSLConfig.rssiConnectThreshold {
+            log.add(.ok, "发现候选设备：\(deviceSummary)\(nameLooksTSL ? "（名称含 TSL，优先连接）" : "")")
+            connectCandidate(peripheral)
+            return
+        }
+
+        // ③ 弱信号（多半是隔壁的打印机）→ 先记住最强的一个，继续扫描等更强的
+        if pendingCandidate == nil || rssiValue > pendingCandidateRSSI {
+            pendingCandidate = peripheral
+            pendingCandidateRSSI = rssiValue
+            log.add(.info, "弱信号 FFF0 设备先观察：\(deviceSummary)（连接门槛 \(TSLConfig.rssiConnectThreshold) dBm，继续扫描）")
+        }
+    }
+
+    /// 连接指定候选：清空上一台的诊断残留（避免头部信息张冠李戴）再发起连接
+    private func connectCandidate(_ peripheral: CBPeripheral) {
         peripheral.delegate = self
+        self.peripheral = peripheral
+        pendingCandidate = nil
+        pendingCandidateRSSI = -127
+        authRetryCount = 0
         central.stopScan()
+        serviceSummary = "-"
+        characteristicSummary = "-"
+        writeSummary = "-"
+        notifySummary = "-"
         transition(.connecting, state: "正在连接…",
-                   hint: "已发现模块，正在建立 BLE 连接。若一直卡在这里，通常是被原 App 占用了连接",
+                   hint: "已发现候选设备，正在建立 BLE 连接；连上后会自动验证是否真为 TSL 模块",
                    detail: deviceSummary)
         central.connect(peripheral, options: nil)
+    }
+
+    /// 判定当前连接的设备「不是 TSL 模块」：拉黑、断开、继续找下一台。
+    /// 依据：FFF0 是打印机通用服务，无 FFF0 服务 / 无可写特征 / 认证零回应都算。
+    private func rejectCurrentDevice(_ reason: String) {
+        let target = peripheral
+        if let target = target {
+            let name = target.name ?? "未命名"
+            rejectedDevices[target.identifier] = "\(name)：\(reason)"
+            updateRejectedSummary()
+            log.add(.warn, "判定非 TSL 模块 → 跳过 \(name)（\(reason)）。已拉黑 \(rejectedDevices.count) 台，继续扫描")
+            central.cancelPeripheralConnection(target)
+        }
+        resetLink()
+        transition(.disconnected, state: "已跳过非 TSL 设备",
+                   hint: "已识别并跳过非 TSL 设备（\(reason)），正在继续搜索真正的 TSL 模块",
+                   level: .warn)
+        if autoReconnect {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                guard let self = self, self.autoReconnect, self.stage == .disconnected else { return }
+                self.restartScan()
+            }
+        }
+    }
+
+    private func updateRejectedSummary() {
+        rejectedSummary = rejectedDevices.isEmpty
+            ? "无" : rejectedDevices.values.joined(separator: " ｜ ")
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -505,9 +627,13 @@ extension TSLBLEManager: CBCentralManagerDelegate {
 
     func centralManager(_ central: CBCentralManager,
                         didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        log.add(.error, "连接失败：\(error?.localizedDescription ?? "未知原因")")
+        let reason = error?.localizedDescription ?? "未知原因"
+        log.add(.error, "连接失败：\(reason)")
+        let failName = peripheral.name ?? "未命名"
+        rejectedDevices[peripheral.identifier] = "\(failName)：连接失败（\(reason)）"
+        updateRejectedSummary()
         transition(.disconnected, state: "连接失败",
-                   hint: "连不上常见原因：模块被原 App / 另一台 iPhone 占用、模块未通电、距离过远",
+                   hint: "连不上常见原因：模块被原 App / 另一台 iPhone 占用、模块未通电、距离过远；该设备已被临时跳过，继续找下一台",
                    level: .error)
         if autoReconnect {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
@@ -537,9 +663,8 @@ extension TSLBLEManager: CBPeripheralDelegate {
         guard let service = services.first(where: {
             $0.uuid.uuidString.uppercased().contains(TSLConfig.serviceUUID.uppercased())
         }) else {
-            transition(.failed, state: "未找到 FFF0 服务",
-                       hint: "实际服务：\(serviceSummary)。可能连到非 TSL 设备，或模块处于 BOOT/DFU 固件模式",
-                       level: .error)
+            log.add(.error, "服务列表无 FFF0：\(serviceSummary)")
+            rejectCurrentDevice("FFF0 服务不存在（实际服务：\(serviceSummary)）")
             return
         }
         log.add(.ok, "命中 TSL 服务：\(service.uuid.uuidString)")
@@ -564,34 +689,44 @@ extension TSLBLEManager: CBPeripheralDelegate {
             ? "(空)" : all.map { describe($0) }.joined(separator: "  ")
         log.add(.info, "FFF0 服务特征清单：\(characteristicSummary)")
 
-        // ① 写特征：UUID 含 FFF1 且可写（原 JS: 未找到写特征（FFF1））
-        guard let write = all.first(where: {
-            matches($0, TSLConfig.writeCharacteristicUUID) && isWritable($0)
-        }) else {
-            transition(.failed, state: "FFF1 写特征未找到",
-                       hint: "实际特征：\(characteristicSummary)。请确认连的是 TSL 模块，不是同名的其它 BLE 设备",
-                       level: .error)
+        // ① 写特征：优先 UUID 含 FFF1 且可写（原 JS 规则）；
+        //    实测发现部分固件角色对调（FFF1 只通知、FFF2 负责写，如 GLACIER 类设备），
+        //    FFF1 不可写时回退到服务内任意可写特征，写入类型按特征真实属性选择。
+        let fff1 = all.first { matches($0, TSLConfig.writeCharacteristicUUID) }
+        let write: CBCharacteristic?
+        if let preferred = fff1, isWritable(preferred) {
+            write = preferred
+        } else {
+            write = all.first(where: isWritable)
+            if let fallback = write, fff1 != nil {
+                log.add(.warn, "FFF1 不可写（角色对调固件形态）→ 写特征回退到 \(describe(fallback))")
+            }
+        }
+        guard let write = write else {
+            rejectCurrentDevice("FFF0 服务下没有任何可写特征（实际特征：\(characteristicSummary)）")
             return
         }
         writeCharacteristic = write
         writeSummary = describe(write)
+        // 同时支持两种写法时优先 withoutResponse（与原 JS 的 writeNoResponse 规则一致）
         writeType = write.properties.contains(.writeWithoutResponse)
             ? .withoutResponse : .withResponse
         let maxLength = peripheral.maximumWriteValueLength(for: writeType)
         chunkSize = max(TSLFrame.defaultChunkSize, min(244, maxLength - 3))
         log.add(.ok, "写特征 → \(writeSummary)｜writeType=\(writeType == .withResponse ? "withResponse" : "withoutResponse")｜分片=\(chunkSize) 字节")
 
-        // ② 通知特征：原 JS 的真实规则
-        //    FFF1 同时「可通知 + 可写」→ 用 FFF1
-        //    否则 → 找 UUID 含 FFE0 的特征（原 JS 不检查 FFE0 的 notify 属性）
-        //    最后 → 兜底用任意可通知特征，并把候选按优先级排队逐个尝试订阅
+        // ② 通知特征：三级回退（候选按优先级排队逐个尝试订阅）
+        //    1. FFF1 同时「可通知 + 可写」→ 用 FFF1（原 JS 规则）
+        //    2. UUID 含 FFE0 的特征（原 JS 回退）
+        //    3. 服务内任意可通知/可指示特征（覆盖「FFF1 只通知、FFF2 只写」
+        //       的角色对调固件，如 GLACIER 类设备）
         let writeFFF1 = all.first { matches($0, TSLConfig.writeCharacteristicUUID) }
         notifyCandidates = []
         if let candidate = writeFFF1, isNotifiable(candidate), isWritable(candidate) {
             notifyCandidates.append(candidate)
             log.add(.ok, "FFF1 同时可写+可通知 → 通知首选 FFF1")
         } else {
-            log.add(.warn, "FFF1 不是「可写+可通知」组合 → 按原协议回退到 FFE0")
+            log.add(.info, "FFF1 不是「可写+可通知」组合 → 尝试回退：FFE0 → 其它可通知特征")
         }
         if let ffe0 = all.first(where: { matches($0, TSLConfig.notifyFallbackUUID) }) {
             if !notifyCandidates.contains(where: { $0.uuid == ffe0.uuid }) {
@@ -599,7 +734,7 @@ extension TSLBLEManager: CBPeripheralDelegate {
             }
             log.add(.info, "FFE0 回退候选：\(describe(ffe0))")
         } else {
-            log.add(.warn, "未发现 FFE0 特征（若 FFF1 可通知则不影响）")
+            log.add(.info, "无 FFE0 特征 → 继续尝试服务内其它可通知特征")
         }
         for extra in all where isNotifiable(extra)
             && !notifyCandidates.contains(where: { $0.uuid == extra.uuid }) {
@@ -607,9 +742,7 @@ extension TSLBLEManager: CBPeripheralDelegate {
         }
 
         guard !notifyCandidates.isEmpty else {
-            transition(.failed, state: "通知特征未找到（FFF1/FFE0）",
-                       hint: "实际特征：\(characteristicSummary)。模块可能处于固件升级模式，或需要先在原 App 里完成一次初始化",
-                       level: .error)
+            rejectCurrentDevice("FFF0 服务下没有任何可通知特征（实际特征：\(characteristicSummary)）")
             return
         }
         subscriptionSucceeded = false
@@ -623,9 +756,7 @@ extension TSLBLEManager: CBPeripheralDelegate {
         }
         guard let candidate = notifyCandidates.first else {
             log.add(.warn, "\(reason)：没有更多通知特征可尝试")
-            transition(.failed, state: "通知订阅失败（FFF1/FFE0 都试过）",
-                       hint: "所有通知特征都试过仍无数据：看上方特征清单，确认模块固件正常、不处于 BOOT/DFU 模式，再点「重新扫描」",
-                       level: .error)
+            rejectCurrentDevice("全部通知特征（FFF1/FFE0/其它）都订阅失败（实际特征：\(characteristicSummary)）")
             return
         }
         notifyCandidates.removeFirst()
@@ -652,6 +783,7 @@ extension TSLBLEManager: CBPeripheralDelegate {
             return
         }
         subscriptionSucceeded = true
+        authRetryCount = 0
         log.add(.ok, "订阅成功：\(characteristic.uuid.uuidString)（isNotifying=true）")
         transition(.awaitingAuth, state: "等待蓝牙密码验证",
                    hint: "通知已打开，正在查询设备信息（160）并验证 4 位密码（默认 1234）",

@@ -53,4 +53,15 @@ enum TSLConfig {
     /// 扫描 / 认证看门狗阈值（秒），诊断页会如实显示当前阶段
     static let scanTimeout: TimeInterval = 12
     static let dataSilenceTimeout: TimeInterval = 8
+
+    /// 2026-11-21 增补：FFF0 同时是大量蓝牙打印机 / 标签机的通用服务，
+    /// 实测环境里 CASL / iKey / LEX / GLACIER 等设备都会广播 FFF0，容易撞车。
+    ///
+    /// RSSI 立即连接门槛：信号强于该值的候选立刻连（车内真模块通常 > -70）；
+    /// 更弱的候选先暂存，等扫描超时后仍无强信号才退而连接。
+    static let rssiConnectThreshold: Int = -75
+
+    /// 认证阶段（连上 + 订阅成功后）连续多少轮重发仍收不到任何 TSL 协议帧，
+    /// 就判定当前设备「不是 TSL 模块」并拉黑（本轮会话内不再尝试），继续找下一台。
+    static let authRetryLimit = 3
 }

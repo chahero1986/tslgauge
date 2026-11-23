@@ -54,20 +54,26 @@ def main() -> int:
         check(f"配置含 {token}", token in config)
     check("服务发现是全量（能看到实际服务列表）", "discoverServices(nil" in ble)
     check("特征发现是全量（不会漏掉 FFE0）", "discoverCharacteristics(nil, for: service)" in ble)
-    check("写特征按 UUID 包含 + 可写筛选",
-          'matches($0, TSLConfig.writeCharacteristicUUID) && isWritable($0)' in ble)
+    check("写特征优先 FFF1，FFF1 不可写时回退任意可写特征",
+          "isWritable(preferred)" in ble
+          and "all.first(where: isWritable)" in ble)
+    check("写特征无任何可写回退时判定非 TSL 并跳过",
+          "没有任何可写特征" in ble)
     check("FFF1 可通知+可写时优先用作通知",
           "isNotifiable(candidate), isWritable(candidate)" in ble)
     check("否则回退到 FFE0",
           'matches($0, TSLConfig.notifyFallbackUUID)' in ble)
+    check("最后兜底任意可通知特征（覆盖角色对调固件）",
+          "for extra in all where isNotifiable(extra)" in ble)
     check("通知候选按优先级排队逐个订阅",
           "notifyCandidates" in ble and "tryNextNotifyCandidate" in ble)
     check("订阅结果有回调校验 isNotifying",
           "didUpdateNotificationStateFor" in ble and "characteristic.isNotifying" in ble)
     # 只看字符串字面量；注释里回顾旧症状不算「还在报这个错」
     check("失败提示不再是笼统的 FFF1 特征不完整",
-          '"FFF1 特征不完整"' not in ble
-          and "通知特征未找到（FFF1/FFE0）" in ble)
+          '"FFF1 特征不完整"' not in ble)
+    check("失败时说明原因并给出实际特征清单",
+          "判定非 TSL 模块" in ble)
     check("写队列用 append 而不是覆盖（连续 send 不丢帧）",
           "pendingChunks.append(contentsOf:" in ble)
     check("按 MTU 计算分片大小",
@@ -152,7 +158,30 @@ def main() -> int:
           "Verify BLE diagnostics" in workflow
           and "python3 scripts/verify_ble_diagnostics.py" in workflow)
 
-    print("\n=== 6. 双小组件数据链路 ===")
+    print("\n=== 6. 非 TSL 设备识别与拉黑（FFF0 撞车打印机） ===")
+    check("配置含 RSSI 立即连接门槛", "rssiConnectThreshold" in config)
+    check("配置含认证重试上限", "authRetryLimit" in config)
+    check("发现设备先查拉黑清单", "rejectedDevices[peripheral.identifier]" in ble)
+    check("名称含 TSL 优先连接", 'contains("TSL")' in ble)
+    check("弱信号候选先暂存，扫描超时再退而连接",
+          "pendingCandidate" in ble and "弱信号 FFF0 设备先观察" in ble)
+    check("无 FFF0 服务 → 拉黑跳过",
+          "rejectCurrentDevice(\"FFF0 服务不存在" in ble)
+    check("无可写特征 → 拉黑跳过",
+          "rejectCurrentDevice(\"FFF0 服务下没有任何可写特征" in ble)
+    check("认证零回应超限 → 拉黑跳过",
+          "authRetryCount >= TSLConfig.authRetryLimit" in ble
+          and "零回应" in ble)
+    check("拉黑清单在诊断页显示并导出",
+          "rejectedSummary" in ble and "已跳过的非 TSL 设备" in ui)
+    check("连接新候选时清空上一台诊断残留（防张冠李戴）",
+          "serviceSummary = \"-\"" in ble)
+    check("回前台补一次超时检查（修后台计时器挂起）",
+          "willEnterForegroundNotification" in ble)
+    check("连接失败 / 连接超时也会拉黑（不反复撞同一台）",
+          "连接失败（" in ble and "无响应" in ble)
+
+    print("\n=== 7. 双小组件数据链路 ===")
     state_src = read("Sources/Shared/GaugeExtrasState.swift")
     attributes_src = read("Sources/Shared/SpeedAttributes.swift")
     store_src = read("Sources/Shared/SharedSpeedStore.swift")
