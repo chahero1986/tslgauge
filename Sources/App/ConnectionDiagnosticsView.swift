@@ -8,6 +8,7 @@ import UIKit
 struct ConnectionDiagnosticsView: View {
     @ObservedObject var ble: TSLBLEManager
     @ObservedObject var log: BLELog
+    @ObservedObject var phone = PhoneSensorManager.shared
     @Environment(\.dismiss) private var dismiss
 
     @State private var passwordDraft = TSLConfig.defaultBLEPassword
@@ -18,6 +19,7 @@ struct ConnectionDiagnosticsView: View {
             List {
                 statusSection
                 actionSection
+                phoneGaugeSection
                 dataSection
                 linkDetailSection
                 logSection
@@ -77,6 +79,28 @@ struct ConnectionDiagnosticsView: View {
             Button(role: .destructive) { log.clear() } label: {
                 Label("清空日志", systemImage: "trash")
             }
+        }
+    }
+
+    /// 小组件 3（纯手机数据）的状态与校准入口——与 BLE 链路完全独立
+    private var phoneGaugeSection: some View {
+        Section("手机仪表（不连车辆）") {
+            row("定位 / 传感器", phone.authorizationNote)
+            if let state = phone.lastSnapshot {
+                row("速度", "\(state.speedText) km/h")
+                row("航向", state.headingLabel)
+                row("海拔", state.altitudeM.map { "\($0) m" } ?? "-- m")
+                row("坡度 / 纵向G", "\(state.slopeText) / \(state.gText)")
+            } else {
+                Text("还没有手机传感器数据。请允许「始终」定位与运动权限。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button("校准水平基准（停车静止时用）") { phone.calibrate() }
+                .buttonStyle(.bordered)
+            Text("校准时请停车、路面水平、手机已固定在支架上；之后坡度与纵向 G 才代表车身姿态。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

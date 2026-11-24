@@ -16,7 +16,9 @@ Swift 编译器要求结构体 memberwise init 的实参顺序与属性声明顺
     SpeedActivityAttributes.ContentState  Sources/Shared/SpeedAttributes.swift
     SpeedSnapshot                         Sources/Shared/SharedSpeedStore.swift
     GaugeExtrasState                      Sources/Shared/GaugeExtrasState.swift
+    PhoneGaugeState                       Sources/Shared/PhoneGaugeState.swift
     SpeedEntry                            Sources/Widget/SpeedWidget.swift
+    PhoneGaugeEntry                       Sources/Widget/PhoneGaugeWidget.swift
     GaugeState                            Sources/App/GaugeFrame176.swift
 """
 import re
@@ -30,7 +32,9 @@ DECL_FILES = {
     "ContentState": "Sources/Shared/SpeedAttributes.swift",
     "SpeedSnapshot": "Sources/Shared/SharedSpeedStore.swift",
     "GaugeExtrasState": "Sources/Shared/GaugeExtrasState.swift",
+    "PhoneGaugeState": "Sources/Shared/PhoneGaugeState.swift",
     "SpeedEntry": "Sources/Widget/SpeedWidget.swift",
+    "PhoneGaugeEntry": "Sources/Widget/PhoneGaugeWidget.swift",
     "GaugeState": "Sources/App/GaugeFrame176.swift",
 }
 
@@ -39,7 +43,9 @@ MIN_CALLS = {
     "ContentState": 4,
     "SpeedSnapshot": 3,
     "GaugeExtrasState": 2,
+    "PhoneGaugeState": 3,
     "SpeedEntry": 3,
+    "PhoneGaugeEntry": 3,
     "GaugeState": 1,
 }
 

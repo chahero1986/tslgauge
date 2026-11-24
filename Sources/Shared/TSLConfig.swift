@@ -32,6 +32,9 @@ enum TSLConfig {
     /// 第二个小组件（车身状态地图）的 kind，同样要求主 App 与声明一致
     static let carBodyWidgetKind = "TSLCarBodyWidget"
 
+    /// 第三个小组件（纯手机数据仪表）的 kind：不连车辆，只用 GPS / 气压计 / 运动传感器
+    static let phoneGaugeWidgetKind = "TSLPhoneGaugeWidget"
+
     /// CoreBluetooth 状态恢复标识（每次启动必须一致，否则后台恢复链会断）
     static let bleRestoreIdentifier = "com.tsl.gauge.ble.central"
 

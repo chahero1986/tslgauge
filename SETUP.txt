@@ -497,3 +497,55 @@
       OBD CAN 上大概率没有；iOS 侧也拿不到其它导航 App 的路线。
       变通：用 iPhone 自带导航时，Apple Maps 自己的实时活动已覆盖转向提示。
 ================================================================================
+
+【14. 第三小组件：TSL 手机仪表（纯 iPhone 数据，2026-11-24 实现）】
+--------------------------------------------------------------------------------
+  需求：新增一个小组件，完全不读车辆数据，只用 iPhone 自身的 GPS / 气压计 /
+  运动传感器。已定稿布局（只做 systemSmall，CarPlay Dashboard 原生槽位）：
+
+    · 正中：7 段码速度，字体最大化；配色与车辆速度完全一致
+      （0~60 绿 / 61~100 黄 / 100+ 红），两位数铺满、三位数自动缩小
+    · 上方居中：航向八方向（北 N / 东北 NE / 东 E / … / 西北 NW）
+    · 左上：海拔（米）      右上：坡度（如 坡 +3.2°）
+    · 下方居中：纵向 G（如 +0.35 G），中性灰，不加颜色规则
+
+  实现文件
+    · Sources/App/PhoneSensorManager.swift —— 传感器采集与融合（主 App target）
+    · Sources/Shared/PhoneGaugeState.swift —— 跨进程契约 + 独立共享容器
+    · Sources/Widget/PhoneGaugeWidget.swift —— 小组件 UI（Widget target）
+    · TSLConfig.phoneGaugeWidgetKind = "TSLPhoneGaugeWidget"
+
+  数据融合规则（真机准确性要点）
+    · 速度：CLLocation.speed（m/s ×3.6），负值判无效，GPS 约 1Hz 有滞后
+    · 航向：车速 ≥5km/h 用 GPS course（不受车内金属干扰）；
+      低速 / 静止回退磁力计 trueHeading
+    · 海拔：GPS 给绝对基准 + CMAltimeter 相对高度做灵敏修正
+      （避免纯 GPS 海拔 ±10~30m 跳数）
+    · 坡度：CMDeviceMotion.attitude.pitch 相对「水平基准」
+    · 纵向 G：userAcceleration.y 低通滤波（α=0.18）+ 静止时缓慢归零偏置
+    · 全部数值 1 秒节流写入 App Group 并 reload Widget；过期降 55% 透明度
+
+  首次上车必做：校准（否则坡度 / 纵向 G 会带手机安装角偏置）
+    · 车辆停在水平路面、静止、手机已固定在支架上
+    · 打开主 App → 底部状态胶囊 → 连接诊断 → 「手机仪表（不连车辆）」
+      分组 → 点「校准水平基准」
+    · 校准只影响坡度与纵向 G；速度 / 航向 / 海拔不依赖校准
+
+  权限（已在 App/Info.plist 配好，自签时确认签名产物保留）
+    · NSLocationAlwaysAndWhenInUseUsageDescription（要选「始终」）
+    · NSLocationWhenInUseUsageDescription
+    · NSMotionUsageDescription
+    · UIBackgroundModes 新增 location（锁屏 / CarPlay 后台持续定位）
+
+  数据独立
+    · 写独立文件 tsl-phone-gauge.json，与车辆速度快照 tsl-speed-snapshot.json
+      互不覆盖；两条链路可同时工作，也可单独只用其中一个
+    · 无 App Group 时桌面小组件显示 "--"；权限未授权时诊断页显示原因
+
+  自检
+    · scripts/verify_phone_gauge.py（新增）检查权限 / 接线 / 数据独立性
+    · scripts/verify_seven_segment.py 第 5 节检查 UI / 配色 / 融合算法
+    · scripts/verify_swift_calls.py 检查 PhoneGaugeState / PhoneGaugeEntry
+      的逐一构造器调用顺序（防止新增字段时漏改调用点，重蹈首轮 CI 覆辙）
+    · 三个脚本都已接入 workflow，编译前运行
+================================================================================

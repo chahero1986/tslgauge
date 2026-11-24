@@ -31,6 +31,10 @@ struct TSLGaugeApp: App {
                         }
 
                         SpeedActivityController.shared.start()
+
+                        // 小组件 3：纯手机数据仪表，与 BLE 链路独立并行启动
+                        PhoneSensorManager.shared.start()
+
                         BLELog.shared.add(.info, "主界面就绪 · 启动实时活动并开始扫描")
                         ble.startScanning()
                     }

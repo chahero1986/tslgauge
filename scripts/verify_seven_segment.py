@@ -113,10 +113,60 @@ def main() -> int:
               ".systemSmall" in car_src and ".systemMedium" in car_src)
         check("Widget 2 中央为电池加热（协议无其它可用状态字段）",
               "BatteryHeatIcon" in car_src)
-    check("Bundle 注册两个小组件",
+    check("Bundle 注册车辆相关两个小组件",
           "SpeedWidget()" in bundle_src and "CarBodyWidget()" in bundle_src)
     check("Live Activity 也用 7 段数码管", "SevenSegmentSpeedView(" in activity_src)
     check("Live Activity 用数值而非解析显示串", "state.speed" in activity_src)
+
+    print("\n=== 5. 小组件 3：纯手机数据仪表 ===")
+    phone_path = ROOT / "Sources" / "Widget" / "PhoneGaugeWidget.swift"
+    sensor_path = ROOT / "Sources" / "App" / "PhoneSensorManager.swift"
+    phone_state_path = ROOT / "Sources" / "Shared" / "PhoneGaugeState.swift"
+    check("Widget 3 文件存在", phone_path.exists())
+    check("传感器采集层文件存在", sensor_path.exists())
+    check("共享数据契约文件存在", phone_state_path.exists())
+    if phone_path.exists():
+        phone = phone_path.read_text(encoding="utf-8")
+        check("Widget 3 用同一套 7 段码组件", "SevenSegmentNumber(" in phone)
+        check("Widget 3 速度配色沿用 SpeedPalette",
+              "SpeedPalette.color(for: speed)" in phone
+              and "SpeedPalette.inactive(for: speed)" in phone)
+        check("Widget 3 只支持 systemSmall（CarPlay 原生槽位）",
+              ".supportedFamilies([.systemSmall])" in phone)
+        check("Widget 3 未误加 disfavoredLocations(.carPlay)",
+              "disfavoredLocations" not in phone)
+        check("Widget 3 显示航向", "heading" in phone)
+        check("Widget 3 显示海拔", "altitudeText" in phone)
+        check("Widget 3 显示坡度", "slope" in phone)
+        check("Widget 3 纵向 G 用中性灰（不加颜色规则）",
+              "Color(white: 0.78)" in phone
+              and "GaugePalette" not in phone)
+        check("Widget 3 数据过期降透明度、不冒充实时",
+              "isLive ? 1.0 : 0.55" in phone and "isStale" in phone)
+    if sensor_path.exists():
+        sensor = sensor_path.read_text(encoding="utf-8")
+        check("速度来自 GPS（m/s → km/h ×3.6）",
+              "gpsSpeedMps * 3.6" in sensor)
+        check("航向移动中用 GPS、低速用磁力计",
+              "magneticHeading" in sensor and "gpsCourse" in sensor and "speed >= 5" in sensor)
+        check("八方向汉字映射 8 项",
+              '"北 N"' in sensor and '"西北 NW"' in sensor)
+        check("海拔 = GPS 基准 + 气压计相对高度",
+              "barometerBaseAltitude" in sensor and "relativeAltitude" in sensor)
+        check("坡度来自姿态 pitch 相对水平基准",
+              "pitchBaseline" in sensor and "currentPitch" in sensor)
+        check("纵向 G 低通滤波 + 静止归零",
+              "lowPassAlpha" in sensor and "accelBias" in sensor)
+        check("1 秒节流写入 + reload Widget（秒级）",
+              "emitInterval" in sensor and "reloadTimelines" in sensor)
+    if phone_state_path.exists():
+        state_src = phone_state_path.read_text(encoding="utf-8")
+        check("契约独立文件、不复用车辆快照",
+              "struct PhoneGaugeState" in state_src
+              and "SharedPhoneGaugeStore" in state_src)
+        check("CarPlay 锁屏可读 protection class",
+              "completeUntilFirstUserAuthentication" in state_src)
+    check("Bundle 注册第三个小组件", "PhoneGaugeWidget()" in bundle_src)
 
     print()
     if errors:

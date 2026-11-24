@@ -26,6 +26,12 @@
 	<true/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>连接 TSL 加装模块，读取车辆实时速度用于仪表与小组件显示</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>车辆行驶中在后台持续读取 GPS 速度、航向与海拔，用于手机仪表小组件（不上传、不记录轨迹）</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>读取 GPS 速度、航向与海拔，用于手机仪表小组件显示</string>
+	<key>NSMotionUsageDescription</key>
+	<string>读取气压计高度与车身姿态，计算海拔、坡度和纵向 G 用于手机仪表小组件</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
@@ -35,6 +41,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
