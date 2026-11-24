@@ -27,6 +27,10 @@
 	</dict>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<!-- Widget 扩展读系统定位缓存（CLLocationManager.location）必需，
+	     否则 iOS 会拒绝扩展的定位访问，降级路径拿不到速度。自签需确认保留。 -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>读取手机最近一次定位缓存，用于「TSL 手机仪表」小组件显示速度与航向</string>
 	<key>TSLAppGroup</key>
 	<string>$(TSL_APP_GROUP)</string>
 </dict>

@@ -81,7 +81,31 @@ def main() -> int:
           and "GaugeExtras" not in sensor
           and "GaugeState(" not in sensor.replace("PhoneGaugeState", ""))
 
-    print("\n=== 5. CI 接线 ===")
+    print("\n=== 5. 无 App Group 时的定位缓存降级（自签场景小组件不显示 -- 的根因修复） ===")
+    widget_src = read(WIDGET)
+    check("Widget 引入 CoreLocation 读系统定位缓存",
+          "import CoreLocation" in widget_src)
+    check("降级读 CLLocationManager.location（不依赖 App Group）",
+          "manager.location" in widget_src
+          and "CachedLocationFallback" in widget_src)
+    check("缓存为空时主动 requestLocation（带超时兜底）",
+          "manager.requestLocation()" in widget_src
+          and "DispatchQueue.main.asyncAfter" in widget_src
+          and "CLLocationManagerDelegate" in widget_src)
+    check("Timeline 入口先读共享文件、再降级缓存",
+          "let shared = store.read()" in widget_src
+          and "fallback.cachedState()" in widget_src
+          and "fallback.requestState" in widget_src)
+    check("缓存快照用定位时间判定新鲜度（旧数据自动降透明度）",
+          "updatedAt: location.timestamp" in widget_src)
+    check("Entry 标记降级来源 fromCacheFallback",
+          "fromCacheFallback" in widget_src and "let fromCacheFallback: Bool" in widget_src)
+    check("缓存降级仍走原 7 段码与配色（无重复实现）",
+          "SpeedPalette.color(for: speed)" in widget_src)
+    check("Widget Info.plist 含定位权限（否则扩展读缓存被系统拒绝）",
+          "<key>NSLocationWhenInUseUsageDescription</key>" in read(ROOT / "Widget" / "Info.plist"))
+
+    print("\n=== 6. CI 接线 ===")
     workflow = read(WORKFLOW)
     check("workflow 有 Verify phone gauge 步骤",
           "Verify phone gauge" in workflow

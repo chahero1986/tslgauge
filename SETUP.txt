@@ -548,4 +548,50 @@
     · scripts/verify_swift_calls.py 检查 PhoneGaugeState / PhoneGaugeEntry
       的逐一构造器调用顺序（防止新增字段时漏改调用点，重蹈首轮 CI 覆辙）
     · 三个脚本都已接入 workflow，编译前运行
+
+【14A. 真机修复：自签无 App Group 时小组件显示 --（2026-11-24）】
+--------------------------------------------------------------------------------
+  现象：主 App 诊断页能看到手机 GPS 数据，但桌面「TSL 手机仪表」小组件
+        一直显示 "--"。三个小组件里只有 Live Activity 有数值。
+
+  根因（逐行核对代码确认，与密码 / 传感器 / 定位权限都无关）：
+    · 主 App 诊断页显示的 GPS 数据来自 PhoneSensorManager 内存里的
+      lastSnapshot，是进程内直接读取，【根本没经过共享文件】。
+    · Widget 是独立进程，只能读 App Group 共享文件 tsl-phone-gauge.json。
+    · 你的构建是 push 触发，app_group_id 留空 → TSL_APP_GROUP = 哨兵
+      __NO_APP_GROUP__ → TSLConfig.appGroupID 返回 nil →
+      SharedPhoneGaugeStore 降级到「主 App 自己的 Documents」。
+    · Widget 沙盒与主 App 隔离，读自己沙盒的 Documents → 永远读不到 → "--"。
+    · 加重因素：本工程没有任何 .entitlements 文件，构建脚本设
+      ENTITLEMENTS_REQUIRED=NO。即使填了 group ID，全能签重签时也未必
+      保留 com.apple.security.application-groups，containerURL 仍返回 nil。
+    · 车辆速度小组件 / 车身状态小组件是同一条共享链路，只是 BLE 没连上
+      所以之前没暴露。
+
+  修复（不依赖 App Group，自签即可用）：
+    · Sources/Widget/PhoneGaugeWidget.swift：Timeline 取数改为两级——
+      ① 先读共享文件（有 App Group 时字段最全，含坡度 / 纵向 G）；
+      ② 共享文件缺失 / 过期，降级读【系统定位缓存】CLLocationManager.location。
+         Widget 扩展与宿主 App 共享定位授权，主 App 前台持续定位时该缓存
+         接近实时；缓存为空再 requestLocation() 主动取一次（3 秒超时兜底）。
+      ③ 两条路都拿不到才显示 "--"，不冒充实时。
+    · Widget/Info.plist 增加 NSLocationWhenInUseUsageDescription，
+      否则 Widget 进程访问定位缓存会被系统直接拒绝。
+    · 降级路径有：速度 / 航向 / 海拔；坡度与纵向 G 显示 "--"，
+      因为姿态数据只有主 App 的 CoreMotion 有，系统定位缓存不含。
+      想要完整字段仍需配 App Group（见下）。
+
+  字段完整性对照：
+    · 无 App Group：速度 ✓ 航向 ✓ 海拔 ✓ 坡度 -- 纵向G --
+    · 有 App Group 且签名保留 entitlement：全部 5 项 ✓（秒级）
+
+  若想要坡度 / 纵向 G 也上小组件（可选增强）：
+    1) 在 GitHub Actions 手动触发 workflow，app_group_id 填 group.com.tsl.gauge
+    2) 用全能签重签时，确认它保留 App Group entitlement
+       （群 ID 需与主 App / Widget 两个 target 一致）
+    3) 装好后到诊断页确认——但当前诊断页未直接显示共享容器状态，
+       可看小组件坡度字段是否出现数值来判断
+
+  验证：verify_phone_gauge.py 新增第 5 节 7 项检查锁住降级路径，
+        防止后续改动误删；全部自检 + 语法 + plist 回归 PASS。
 ================================================================================
