@@ -79,6 +79,23 @@ def main() -> int:
     check("按 MTU 计算分片大小",
           "maximumWriteValueLength(for: writeType)" in ble)
 
+    print("\n=== 1B. 160 帧认证判定（2026-11-23 真机日志修正） ===")
+    check("runtimeFlag 取 payload[3]（不是 payload[0]）",
+          "frame.payload[3]" in ble and "let runtimeFlag" in ble)
+    check("runtimeReady 取 runtimeFlag 最低位",
+          "(runtimeFlag & 1) == 1" in ble)
+    check("160x2 即认证完成（不依赖 168 密码）",
+          "deviceInfoProofCount >= 2" in ble
+          and 'completeAuth(proof: "160x2 运行固件就绪")' in ble)
+    check("runtimeFlag=0 明确提示升级引导模式",
+          "模块运行固件未就绪" in ble and "BOOT/DFU" in ble)
+    check("已去掉错误的 payload[0]!=0 判定",
+          "first != 0" not in ble)
+    check("168 密码错误不把链路判死（仍有 160x2 并行路径）",
+          "继续等 160x2 证明" in ble)
+    check("认证完成日志带依据（proof）",
+          "认证通过" in ble and "proof.isEmpty" in ble)
+
     print("\n=== 2. 全链路连接日志覆盖 ===")
     callbacks = [
         "centralManagerDidUpdateState", "willRestoreState", "didDiscover peripheral",

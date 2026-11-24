@@ -364,9 +364,11 @@ final class TSLBLEManager: NSObject, ObservableObject {
         send(type: 168, payload: bytes)
     }
 
-    private func completeAuth() {
+    private func completeAuth(proof: String = "") {
         guard !authenticated else { return }
         authenticated = true
+        let proofNote = proof.isEmpty ? "" : "（依据 \(proof)）"
+        log.add(.ok, "认证通过" + proofNote)
         transition(.streaming, state: "已连接 · 实时数据",
                    hint: "连接正常：每 1.5s 请求一次 176 帧，桌面 / CarPlay 小组件与锁屏实时活动同步刷新",
                    level: .ok)
@@ -387,12 +389,28 @@ final class TSLBLEManager: NSObject, ObservableObject {
     private func handle(_ frame: TSLFrameDecoder.Frame) {
         switch frame.type {
         case 160:   // 设备信息 / 运行固件就绪证明
+            // ⚠️ 2026-11-23 修正：原小程序 app-service.js 的真实判定字段：
+            //   s = e[3] || 0                      ← payload[3] 才是 runtimeFlag
+            //   runtimeReady = 1 == (1 & s)        ← 取最低位
+            //   handleDeviceRuntimeProof: 160 帧累计 >= 2 且 runtimeReady → completeBleAuth
+            // 旧代码错误地用 payload[0]（硬件版本号，实测为 0x00）!= 0 判定，
+            // 导致运行固件明明就绪却永远停在「等待认证」。
             let first = frame.payload.first ?? 0
-            log.add(.data, "160 设备信息帧 len=\(frame.payload.count) first=0x\(String(format: "%02X", Int(first)))")
+            let runtimeFlag = frame.payload.count > 3 ? frame.payload[3] : 0
+            let runtimeReady = (runtimeFlag & 1) == 1
+            log.add(.data, "160 设备信息帧 len=\(frame.payload.count) hwVer=0x\(String(format: "%02X", Int(first))) runtimeFlag=0x\(String(format: "%02X", Int(runtimeFlag))) runtimeReady=\(runtimeReady) proofCount=\(deviceInfoProofCount + 1)")
+            if !runtimeReady {
+                log.add(.error, "160 runtimeFlag 最低位=0 → 模块处于升级引导模式，运行固件未就绪")
+                transition(.failed, state: "模块运行固件未就绪",
+                           hint: "160 帧 runtimeFlag=0x\(String(format: "%02X", Int(runtimeFlag))) 最低位为 0，说明模块当前在升级引导（BOOT/DFU）模式，不会产出仪表数据。请退出固件升级模式或重新给模块上电，再点「重新扫描」",
+                           level: .error)
+                return
+            }
             deviceInfoProofCount += 1
-            // JS: 收到 2 次 160 且 deviceRuntimeReady 才算认证完成
-            if !authenticated, deviceInfoProofCount >= 2, first != 0 {
-                completeAuth()
+            // 原 JS: 160 帧累计 >= 2 且 runtimeReady → completeBleAuth("160x2")
+            // 注意：这一条路径不需要 168 密码验证通过（原 App 即如此）
+            if !authenticated, deviceInfoProofCount >= 2 {
+                completeAuth(proof: "160x2 运行固件就绪")
             }
 
         case 168:  // 密码校验回包：payload[0] 1=正确 0=错误 254/255=需要提交密码
@@ -404,9 +422,11 @@ final class TSLBLEManager: NSObject, ObservableObject {
                            hint: "密码已通过，正在等设备信息帧（160）确认运行固件就绪")
                 send(type: 160)
             case 0:
-                log.add(.error, "168 密码错误（当前提交的是 \(password)）")
-                connectionState = "蓝牙密码错误"
-                hint = "密码错误：在下方输入正确 4 位密码并点「重新提交密码」，不用重新连接蓝牙"
+                // 原 JS 这里会提示重输密码，但认证还有 160x2 + runtimeReady 这条并行路径
+                // （原 App 的 authProof="160x2"），所以不能把链路判死，继续等 160 帧。
+                log.add(.warn, "168 返回密码不匹配（当前提交的是 \(password)），继续等 160x2 证明")
+                connectionState = "密码校验未通过，等待 160x2 证明"
+                hint = "168 回包说密码不匹配；但原 App 还有「两次 160 + 运行固件就绪」这条认证路径，正在继续等待。若始终连不上，请在下方输出正确 4 位密码并点「重新提交密码」"
             case 254, 255:
                 log.add(.info, "168 要求提交密码 → 发送 \(password)")
                 sendKey()
