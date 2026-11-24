@@ -60,6 +60,11 @@ jobs:
         # 在后续改动里没被误删（首次真机反馈「FFF1 特征不完整」的根因）
         run: python3 scripts/verify_ble_diagnostics.py
 
+      - name: Verify phone gauge
+        # 小组件 3（纯手机数据）：定位/运动权限、主 App 接线、数据独立性。
+        # 这些漏了不会编译失败，但真机上功能静默失效，必须在编译前拦住。
+        run: python3 scripts/verify_phone_gauge.py
+
       - name: Configure Bundle ID
         env:
           TSL_BUNDLE_ID: ${{ inputs.bundle_id || 'com.tsl.gauge' }}
