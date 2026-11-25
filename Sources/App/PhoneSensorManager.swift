@@ -77,8 +77,11 @@ final class PhoneSensorManager: NSObject, ObservableObject, CLLocationManagerDel
             authorizationNote = "定位被拒绝：请在系统设置里允许「始终」"
         case .authorizedAlways, .authorizedWhenInUse:
             authorizationNote = "定位已授权"
-            // 手机仪表 Live Activity 必须在 App 前台启动；授权回调里通常是前台
-            PhoneGaugeActivityController.shared.start()
+            // 手机仪表 Live Activity 必须在 App 前台启动；授权回调里通常是前台。
+            // 控制器是 @MainActor，这里显式 hop，避免从非隔离上下文同步调用。
+            Task { @MainActor in
+                PhoneGaugeActivityController.shared.start()
+            }
             startUpdates()
         @unknown default:
             authorizationNote = "未知定位权限状态"
@@ -251,7 +254,11 @@ final class PhoneSensorManager: NSObject, ObservableObject, CLLocationManagerDel
 
         // L2：手机仪表 Live Activity（秒级实时，后台也能推，不走 WidgetKit 预算）
         let inBackground = UIApplication.shared.applicationState != .active
-        PhoneGaugeActivityController.shared.update(snapshot, inBackground: inBackground)
+        // PhoneGaugeActivityController 是 @MainActor，这里是同步非隔离上下文，
+        // 必须显式切到主 actor，否则 Swift 5 模式下也是 error。
+        Task { @MainActor in
+            PhoneGaugeActivityController.shared.update(snapshot, inBackground: inBackground)
+        }
 
         // L3：桌面小组件只在前台 reload。后台刷新会计入 WidgetKit 每日预算，
         // 每秒调用会迅速烧光预算、之后被系统限流得更狠；后台交给系统调度。

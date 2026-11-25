@@ -14,7 +14,7 @@ import SwiftUI
 ///
 /// ⚠️ 字段顺序 = 逐一构造器实参顺序，改动必须同步全部调用点；
 ///    scripts/verify_swift_calls.py 会在 CI 编译前逐处校验。
-struct PhoneGaugeState: Codable, Hashable {
+struct PhoneGaugeState: Codable, Hashable, Sendable {
     var speed: Int?               // GPS 速度 km/h，负值无效
     var speedText: String         // 数码管显示串，无效为 "--"
     var headingLabel: String      // 八方向，如 "东北 NE"；无效 "--"
