@@ -105,7 +105,35 @@ def main() -> int:
     check("Widget Info.plist 含定位权限（否则扩展读缓存被系统拒绝）",
           "<key>NSLocationWhenInUseUsageDescription</key>" in read(ROOT / "Widget" / "Info.plist"))
 
-    print("\n=== 6. CI 接线 ===")
+    print("\n=== 6. 手机仪表 Live Activity（切后台仍秒级实时的关键） ===")
+    attrs = read(ROOT / "Sources" / "Shared" / "PhoneGaugeActivityAttributes.swift")
+    controller = read(ROOT / "Sources" / "App" / "PhoneGaugeActivityController.swift")
+    live = read(ROOT / "Sources" / "Widget" / "PhoneGaugeLiveActivity.swift")
+    bundle = read(ROOT / "Sources" / "Widget" / "TSLWidgetsBundle.swift")
+    check("Activity 契约复用 PhoneGaugeState（typealias，规避构造器顺序坑）",
+          "typealias ContentState = PhoneGaugeState" in attrs)
+    check("控制器用本地更新 pushType nil（自签无 APNs 也能跑）",
+          "pushType: nil" in controller)
+    check("控制器后台时把坡度 / 纵向 G 清空为 --（不拿冻结姿态冒充实时）",
+          'slopeText: "坡 --"' in controller and 'gText: "-- G"' in controller)
+    check("Live Activity 用 7 段码 + 分段配色",
+          "SevenSegmentNumber" in live and "SpeedPalette.color" in live)
+    check("?: 两端显式 Color（避免上次编译的类型不一致）",
+          "Color.orange" in live and "Color.secondary" in live)
+    check("WidgetBundle 注册手机仪表 Live Activity",
+          "PhoneGaugeLiveActivity()" in bundle)
+
+    print("\n=== 7. 刷新策略（修后台烧预算 + 缩短兜底间隔） ===")
+    check("传感器层驱动 Live Activity 更新",
+          "PhoneGaugeActivityController.shared.update" in sensor)
+    check("Widget reload 加前台判断（后台不计入预算浪费）",
+          "applicationState != .active" in sensor
+          and "if !inBackground" in sensor
+          and "reloadTimelines(ofKind: widgetKind)" in sensor)
+    check("timeline 兜底间隔缩短到 1 分钟",
+          "value: 1, to: Date()" in widget_src)
+
+    print("\n=== 8. CI 接线 ===")
     workflow = read(WORKFLOW)
     check("workflow 有 Verify phone gauge 步骤",
           "Verify phone gauge" in workflow

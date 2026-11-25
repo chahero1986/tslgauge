@@ -10,7 +10,9 @@ import WidgetKit
 ///                          灯光位 / 电池加热（图标化，颜色即状态）
 ///   · PhoneGaugeWidget   → 小组件 3「TSL 手机仪表」：不连车辆，纯 iPhone
 ///                          GPS 速度 / 航向 / 海拔 / 坡度 / 纵向 G
-///   · SpeedLiveActivity  → 锁屏 / 灵动岛 / iOS 26 CarPlay Dashboard（秒级实时）
+///   · SpeedLiveActivity  → 车辆速度的实时载体（锁屏 / 灵动岛 / CarPlay）
+///   · PhoneGaugeLiveActivity → 手机仪表的实时载体：后台也能秒级更新，
+///                               解决桌面小组件切后台冻结的问题
 @main
 struct TSLWidgetsBundle: WidgetBundle {
     var body: some Widget {
@@ -18,5 +20,6 @@ struct TSLWidgetsBundle: WidgetBundle {
         CarBodyWidget()
         PhoneGaugeWidget()
         SpeedLiveActivity()
+        PhoneGaugeLiveActivity()
     }
 }

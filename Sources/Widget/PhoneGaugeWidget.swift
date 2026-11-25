@@ -125,8 +125,10 @@ struct PhoneGaugeTimelineProvider: TimelineProvider {
     func getTimeline(in context: Context, completion: @escaping (Timeline<PhoneGaugeEntry>) -> Void) {
         resolveEntry { entry in
             // 主 App 前台时由 WidgetCenter.reloadTimelines 覆盖为秒级；
-            // 这里给系统预算下的保守兜底（15 分钟后过期重建）。
-            let next = Calendar.current.date(byAdding: .minute, value: 15, to: Date()) ?? Date()
+            // 后台靠系统预算调度，1 分钟后过期重建（用户要求缩短，且能拿到
+            // 系统定位缓存的新值；实际刷新频率仍受系统预算，不保证准点）。
+            // 真正的秒级实时请看手机仪表的 Live Activity。
+            let next = Calendar.current.date(byAdding: .minute, value: 1, to: Date()) ?? Date()
             completion(Timeline(entries: [entry], policy: .after(next)))
         }
     }

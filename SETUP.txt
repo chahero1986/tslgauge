@@ -594,4 +594,48 @@
 
   验证：verify_phone_gauge.py 新增第 5 节 7 项检查锁住降级路径，
         防止后续改动误删；全部自检 + 语法 + plist 回归 PASS。
+
+【14B. 手机仪表实时性：新增 Live Activity + 修后台刷新（2026-11-25）】
+--------------------------------------------------------------------------------
+  现象：App 内能看到 GPS 数据，切到桌面小组件有数值但不更新。
+  用户问「是不是应用最小化后小组件就停了」——是的，但这是 iOS 机制，不是 bug。
+
+  根因（三层）：
+    1) 桌面小组件是【快照】不是实时视图：WidgetKit 只在系统生成新 timeline
+       时刷新一次，之后冻结。原兜底策略 .after(15 分钟) 意味着没有刷新请求
+       时 15 分钟才重建。
+    2) 悖论：App 前台时 reloadTimelines 畅通（不计预算），但那一刻你看的是
+       App；你切到桌面看小组件时 App 已进后台，后台 reload 计入每日预算并被
+       系统限流。上一轮读系统定位缓存只解决「有数值」，解决不了「会更新」。
+    3) 代码加重因素：PhoneSensorManager.emit 原来每秒无条件调 reloadTimelines，
+       没有 applicationState 判断，后台每秒请求会迅速烧光 WidgetKit 预算，
+       之后被限流得更狠。（车辆链路 SpeedRefreshDriver 本来就有前台判断。）
+
+  修复（三管齐下）：
+    A. 新增手机仪表 Live Activity——真正的秒级实时通道：
+       · Sources/Shared/PhoneGaugeActivityAttributes.swift：契约用
+         typealias ContentState = PhoneGaugeState 复用现有 8 字段结构，
+         零字段重复，从根本上规避首轮 CI 的构造器顺序编译失败。
+       · Sources/App/PhoneGaugeActivityController.swift：本地更新
+         pushType: nil（自签无 APNs 可用）；与车辆速度 Activity 是不同
+         attributes 类型的独立活动，互不覆盖。
+       · Sources/Widget/PhoneGaugeLiveActivity.swift：锁屏 / 灵动岛 /
+         iOS 26 CarPlay Dashboard，7 段码速度 + 航向 / 海拔 / 坡度 / 纵向 G。
+       · WidgetBundle 注册第 5 个组件；PhoneSensorManager 授权后与 TSLApp
+         回前台时各启动一次（内部幂等 + 前台判断）。
+    B. 后台诚实边界：iOS 不允许普通 App 后台持续读 CoreMotion 姿态与气压计。
+       控制器在 inBackground 时把坡度 / 纵向 G 清空为 "--"，不拿冻结的旧姿态
+       冒充实时；速度 / 航向 / 海拔来自 GPS（有 location 后台模式）持续更新。
+    C. 桌面小组件：PhoneSensorManager 的 reloadTimelines 加前台判断
+       （!inBackground），不再后台烧预算；timeline 兜底从 15 分钟缩到 1 分钟。
+
+  怎么看实时数据：
+    · 锁屏 / 灵动岛 / CarPlay Dashboard 上的手机仪表卡片 = 秒级实时（推荐）
+    · 桌面小组件 = 瞥一眼的低频快照，不指望它秒级跳数
+    · 两个 Activity（车辆速度 + 手机仪表）会同时存在，互不干扰
+
+  验证：verify_phone_gauge.py 新增第 6 / 7 节共 10 项检查（Live Activity
+        接线、pushType nil、后台清空姿态、前台 reload 判断、1 分钟策略）；
+        verify_swift_calls.py 确认 typealias 后 5 处 PhoneGaugeState 构造
+        顺序全部正确；全部自检 + 语法 + plist 回归 PASS。
 ================================================================================
