@@ -42,6 +42,7 @@ def main() -> int:
     log = read("Sources/App/BLELog.swift")
     ui = read("Sources/App/ConnectionDiagnosticsView.swift")
     app = read("Sources/App/TSLApp.swift")
+    dashboard = read("Sources/App/ExpandedDashboardView.swift")
     extras = read("Sources/App/GaugeExtras.swift")
     setup = read("SETUP.txt")
     workflow = read(".github/workflows/build-unsigned-ipa.yml")
@@ -121,8 +122,8 @@ def main() -> int:
     print("\n=== 3. 诊断界面与密码重提 ===")
     check("密码可立即重新提交", "func submitPassword(" in ble and "sendKey()" in ble)
     check("主 App 用 sheet 挂上诊断页",
-          "ConnectionDiagnosticsView(ble: ble, log: BLELog.shared)" in app
-          and ".sheet(isPresented: $showDiagnostics)" in app)
+          "ConnectionDiagnosticsView(ble: ble, log: BLELog.shared)" in dashboard
+          and ".sheet(isPresented: $showDiagnostics)" in dashboard)
     check("诊断页显示阶段 / 建议 / 帧数 / 距上次收帧",
           all(t in ui for t in ["ble.stage.label", "ble.hint", "ble.frameCount", "lastFrameText"]))
     check("诊断页显示实际服务 / 全部特征 / 写与通知特征",
@@ -132,8 +133,10 @@ def main() -> int:
           "UIPasteboard.general.string" in ui and "log.clear()" in ui
           and "log.exportText()" in ui)
     check("诊断页能预览 176 帧全部字段", "ble.extras?.previewLines" in ui)
-    check("主界面保持纯速度（只有状态入口按钮）",
-          "SevenSegmentSpeedView(" in app and "TextField(" not in app)
+    check("主入口使用完整仪表 ExpandedDashboardView",
+          "ExpandedDashboardView(" in app)
+    check("主界面不出现密码输入框（密码只在诊断页）",
+          "TextField(" not in dashboard)
 
     print("\n=== 4. 176 帧全字段解析（GaugeExtras）===")
     required_fields = [

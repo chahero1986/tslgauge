@@ -11,97 +11,47 @@ import UIKit
 @main
 struct TSLGaugeApp: App {
     @StateObject private var ble = TSLBLEManager.shared
+    @StateObject private var phone = PhoneSensorManager.shared
 
     var body: some Scene {
         WindowGroup {
-            SpeedDashboardView(ble: ble, driver: SpeedRefreshDriver.shared)
-                .onAppear {
-                    Task { @MainActor in
-                        UIApplication.shared.isIdleTimerDisabled = true
-
-                        ble.onSpeedUpdate = { state in
-                            Task { @MainActor in
-                                SpeedRefreshDriver.shared.ingest(state, frameExtras: ble.extras)
-                            }
-                        }
-                        ble.onDisconnect = {
-                            Task { @MainActor in
-                                SpeedRefreshDriver.shared.markDisconnected()
-                            }
-                        }
-
-                        SpeedActivityController.shared.start()
-
-                        // 小组件 3：纯手机数据仪表，与 BLE 链路独立并行启动
-                        PhoneSensorManager.shared.start()
-                        // 手机仪表 Live Activity：回到前台时补一次，
-                        // 找回被系统清理的活动（内部有幂等与前台判断）
-                        PhoneGaugeActivityController.shared.start()
-
-                        BLELog.shared.add(.info, "主界面就绪 · 启动实时活动并开始扫描")
-                        ble.startScanning()
-                    }
-                }
-                .onDisappear {
-                    UIApplication.shared.isIdleTimerDisabled = false
-                }
-        }
-    }
-}
-
-/// 全屏仪表：既是最可靠的秒级实时界面，也是 AirPlay / AI Box 镜像投屏的源画面。
-///
-/// 按「界面要纯粹」的要求，这里只保留大号 7 段速度数字 + 一个极小的状态入口；
-/// 密码、重新扫描、连接日志、字段预览全部收进弹出的「连接诊断」页。
-struct SpeedDashboardView: View {
-    @ObservedObject var ble: TSLBLEManager
-    @ObservedObject var driver: SpeedRefreshDriver
-
-    @State private var showDiagnostics = false
-
-    var body: some View {
-        ZStack(alignment: .bottom) {
-            SevenSegmentSpeedView(
-                text: ble.latest?.speedText ?? "--",
-                speed: ble.latest?.speed,
-                isLive: driver.connected,
-                showsStatusDot: true
+            // 完整仪表：速度 + 三块小组件的全部信息 + HUD 镜像开关，
+            // 详见 ExpandedDashboardView.swift。
+            ExpandedDashboardView(
+                ble: ble,
+                driver: SpeedRefreshDriver.shared,
+                phone: phone
             )
-            .frame(height: 200)
-            .padding(.horizontal, 24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .onAppear {
+                Task { @MainActor in
+                    UIApplication.shared.isIdleTimerDisabled = true
 
-            Button { showDiagnostics = true } label: {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 7, height: 7)
-                    Text(ble.connectionState)
-                        .font(.footnote)
-                    Image(systemName: "chevron.up")
-                        .font(.caption2)
+                    ble.onSpeedUpdate = { state in
+                        Task { @MainActor in
+                            SpeedRefreshDriver.shared.ingest(state, frameExtras: ble.extras)
+                        }
+                    }
+                    ble.onDisconnect = {
+                        Task { @MainActor in
+                            SpeedRefreshDriver.shared.markDisconnected()
+                        }
+                    }
+
+                    SpeedActivityController.shared.start()
+
+                    // 小组件 3：纯手机数据仪表，与 BLE 链路独立并行启动
+                    PhoneSensorManager.shared.start()
+                    // 手机仪表 Live Activity：回到前台时补一次，
+                    // 找回被系统清理的活动（内部有幂等与前台判断）
+                    PhoneGaugeActivityController.shared.start()
+
+                    BLELog.shared.add(.info, "主界面就绪 · 启动实时活动并开始扫描")
+                    ble.startScanning()
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 7)
-                .background(.ultraThinMaterial, in: Capsule())
             }
-            .buttonStyle(.plain)
-            .padding(.bottom, 28)
-            .accessibilityLabel("打开连接诊断，当前状态：\(ble.connectionState)")
-        }
-        .sheet(isPresented: $showDiagnostics) {
-            ConnectionDiagnosticsView(ble: ble, log: BLELog.shared)
-        }
-    }
-
-    /// 绿 = 实时数据；橙 = 正在连接/认证；红 = 明确失败；灰 = 未连接
-    private var statusColor: Color {
-        switch ble.stage {
-        case .streaming:                          return .green
-        case .failed, .bluetoothOff, .unauthorized: return .red
-        case .disconnected, .idle:                return .gray
-        default:                                  return .orange
+            .onDisappear {
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
         }
     }
 }
