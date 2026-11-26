@@ -65,6 +65,11 @@ jobs:
         # 这些漏了不会编译失败，但真机上功能静默失效，必须在编译前拦住。
         run: python3 scripts/verify_phone_gauge.py
 
+      - name: Verify expanded dashboard
+        # 主 App 完整仪表（把三个小组件内容搬进 App）+ HUD 镜像开关。
+        # 漏接数据源或把按钮嵌进镜像容器不会被编译器发现，只能静态拦。
+        run: python3 scripts/verify_expanded_dashboard.py
+
       - name: Configure Bundle ID
         env:
           TSL_BUNDLE_ID: ${{ inputs.bundle_id || 'com.tsl.gauge' }}
